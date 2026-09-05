@@ -4,7 +4,7 @@ A family tree that reads straight from a Google Sheet. One HTML file, no backend
 no build step, no database — you edit the sheet, the chart follows.
 
 As featured in [this video](https://www.youtube.com/watch?v=sqA5RL_FUuo) ·
-**[Live demo](https://familytree.techlead-510.workers.dev/)**
+**[Live demo](https://techleadhd.github.io/ftree/)**
 
 <img width="3338" height="1688" alt="The chart: five generations, with one person selected and their ancestry drawn in bold" src="https://github.com/user-attachments/assets/77748077-8768-4a1f-9b9a-7812ca42ef6a" />
 
