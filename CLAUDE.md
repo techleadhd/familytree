@@ -156,21 +156,13 @@ field, which needs an API key and a `files.list` call the page doesn't make.
 If photos stop loading, that is the first thing to check.
 
 **The photo band costs nothing until it is used.** `hasPhotos` is set in
-`buildModel`, and only then does `setMode` add `PHOTO_BAND` to `BOX_H` and
+`buildModel`, and only then does `setMetrics` add `PHOTO_BAND` to `BOX_H` and
 `GEN_H`. An empty photo column renders exactly the chart that existed before
 the column did.
 
-**Both detail levels show faces**, at their own radius: `PHOTO_R` is a property
-of the mode (32 full, 18 compact), and `PHOTO_BAND` is derived from whichever
-is current, so a compact box grows 42px rather than 70. What makes a zoomed-out
-box unreadable is ten lines of description, not a face — and a face is usually
-the fastest way to find someone from across the chart, which is exactly what
-zoomed-out is for. `.compact .initials` shrinks the text in an empty circle to
-match, and the baseline offset follows the type size.
-
 People without a photo get their initials in a circle, so a row with one
 photo in it doesn't look broken. `PHOTO_BAND` is derived from `PHOTO_R`, so
-resizing the face is one number per mode; the only gap under the circle is the
+resizing the face is one number; the only gap under the circle is the
 name's own leading. Both are drawn through a single
 `clipPathUnits="objectBoundingBox"` circle, which crops any image to a circle
 regardless of its size or position — one clip path for the whole chart.
@@ -178,24 +170,36 @@ regardless of its size or position — one clip path for the whole chart.
 Drive photos of living relatives in a link-shared folder are world-readable
 to anyone with the URL, same as the birth years. Still unresolved.
 
-## Detail levels
+## One box, one size
 
-The chart renders at one of two sizes, chosen by zoom (`DETAIL` in the config
-block). Zoomed out, a ten-line description per box is an unreadable smear, so
-boxes collapse to a name and a date range; past `ZOOM_IN` they expand again.
-The gap between `ZOOM_OUT` and `ZOOM_IN` is hysteresis — without it the mode
-flaps while the wheel is turning.
+There used to be two: a full box, and a shorter one with no description and a
+smaller face that the zoom switched to below k=0.62, with a hysteresis band up
+to 0.72 so it wouldn't flap while the wheel turned. **It is gone**, and the
+reasoning is worth keeping because the idea will come back.
 
-Only heights differ between the modes. x positions depend on `BOX_W` alone,
-so switching re-renders but nothing moves sideways, and the view is pinned by
-whatever sits in the middle of the viewport. `DROP` is derived from `BOX_H`
-rather than tuned by hand, so a new mode only needs its three numbers.
+The premise was right — ten lines of description are an unreadable smear from
+far away — but the smear costs nothing, and the switch cost plenty. It
+re-rendered the whole chart mid-gesture, it changed every height under whatever
+was being pinched, framed or centred (so `fit`, `fitTo` and the pinch handler
+each carried a second pass or a re-anchor to survive it), and it made the box
+you were looking at not the box you had zoomed towards. Removing it took out
+`DETAIL`, `setMode`, `wantMode`, `maybeSwitch`, `ZOOM_OUT`/`ZOOM_IN`, the
+`.compact` CSS, and a two-pass loop in three functions; zooming now never
+re-renders at all.
 
-Re-rendering throws away the person groups, and with them every class that
+What is left is `setMetrics()`, which computes `BOX_H`, `GEN_H` and `DROP` from
+`BOX_BASE`/`GEN_BASE` plus the photo band. The only thing that still varies is
+whether the sheet has photos, and that changes once, when the rows arrive.
+
+If a low-zoom view ever does need simplifying, do it in CSS off a class on the
+`<svg>` — fading `.desc` out costs no re-render and moves nothing, which is the
+part that made the old system annoying.
+
+Re-rendering (a reload, a resize, a fresh sheet) throws away the person groups, and with them every class that
 carries state — selection, dimming, the comparison target, search hits. That
 is why `render()` ends in `repaint()`, which puts all of them back. Anything
 new that lives in a class on `.person` has to be added there or it will
-vanish the first time someone zooms. The same goes for anything keyed to
+vanish the first time the chart is rebuilt. The same goes for anything keyed to
 coordinates: `linkGeom` and the lit-lineage layer are rebuilt by every render,
 and `repaint()` redraws the bold run from them.
 
@@ -226,6 +230,23 @@ it gets a `.lit` class in place, hop and all.
 
 `ancestry()` guards against revisiting a person, since a cousin marriage can
 rejoin a branch and would otherwise walk the shared ancestors twice.
+
+## Search
+
+Typing in the find box marks the hits (`.hit-match`) **and frames them**:
+`fitTo()` takes the smallest rectangle holding every match and centres it, so a
+name three screens to the left comes to you rather than being highlighted where
+you can't see it. One hit lands at k=1; a common surname zooms out until they
+all fit.
+
+Two rules keep it from being twitchy: the view moves only when the **set** of
+hits changes — typing the rest of a name that already matched one person leaves
+it alone — and a query that matches nobody, or an emptied box, doesn't move it
+at all. Yanking the view somewhere on the way to a name nobody has is worse
+than staying put.
+
+`fitTo()` frames into what the panel leaves of the viewport — width on a
+desktop, height under the sheet on a phone.
 
 ## Permalinks
 
@@ -312,9 +333,9 @@ brick red, which claimed a second meaning the panel's sentence already carried.
   and `BOX_H` is sized to hold that many lines). Long unbroken words
   can run slightly wide. A real fix measures with `getComputedTextLength()`.
 - **Width.** Generation 3 is ~2,300px, and fit-to-screen is limited by width,
-  not height — which is why compact mode leaves so much empty space above and
-  below. A focus mode showing two generations either side of a selected person
-  would still beat panning, and doesn't exist yet.
+  not height, so a fitted chart leaves empty space above and below and the
+  boxes are still small. A focus mode showing two generations either side of a
+  selected person would beat panning, and doesn't exist yet.
 - **Privacy.** Link-sharing makes birth years and full names of living people
   world-readable to anyone with the URL. Unresolved. Options: a `public` flag
   column suppressing years for the living, or hosting behind Cloudflare Access.

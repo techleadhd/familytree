@@ -57,13 +57,9 @@ main{flex:1; position:relative; overflow:hidden}
 .nm{fill:var(--ink); font-size:13.5px; font-weight:500}
 .yr{fill:var(--muted); font-size:10.5px}
 .desc{fill:var(--muted); font-size:10.5px}
-/* compact boxes are read at low zoom, so the name carries a little more weight */
-.compact .nm{font-size:15px}
-.compact .yr{font-size:9.5px}
 .avatar-blank{fill:var(--band)}
 .avatar-ring{fill:none; stroke:var(--rule); stroke-width:.75}
 .initials{fill:var(--muted); font-size:20px; text-anchor:middle}
-.compact .initials{font-size:12px}
 .divider{stroke:var(--rule); stroke-width:.5; opacity:.45}
 .link{stroke:var(--rule); stroke-width:1; fill:none}
 .link.cross{stroke:var(--rule)}
@@ -329,20 +325,17 @@ const gviz = (id, tab, cb) =>
 const BOX_W=152, PAIR_GAP=30, SIB_GAP=26, GROUP_GAP=44,
       SOLO_DROP=56, PAD=70, GUTTER=50, DESC_CHARS=27;
 
-/* Two levels of detail. Zoomed out, ten lines of description per box are an
-   unreadable grey smear and the chart is needlessly tall, so boxes collapse
-   to a name and a date range. Only the heights differ: x positions depend on
-   BOX_W alone, so switching modes slides the tree vertically and nothing
-   moves sideways. */
-const DETAIL={
-  full:   {BOX_H:176, GEN_H:300, DESC_LINES:10, PHOTO_R:32},
-  compact:{BOX_H:44,  GEN_H:168, DESC_LINES:0,  PHOTO_R:18}
-};
+/* One box, one size. There used to be a second, shorter box that the zoom
+   switched to, on the theory that ten lines of description are a grey smear
+   from far away. They are — but the smear costs nothing, and the switch cost
+   plenty: a re-render mid-gesture, every height changing under whatever was
+   being pinched or framed, two-pass measuring in every function that chooses a
+   zoom, and a hysteresis band so the thing wouldn't flap on the way past. The
+   box people zoom into is the box they see. */
+const BOX_BASE=176, GEN_BASE=300, DESC_LINES=10, PHOTO_R=32;
 /* Room for a face at the top of a box, added only when the sheet actually has
    photos in it — until the first one is filled in, nobody pays for the empty
-   band. A compact box keeps its face at a smaller radius: the description is
-   what makes a zoomed-out box unreadable, a face at any size is still a face,
-   and it is usually the fastest way to find someone from across the chart. */
+   band. */
 const PHOTO_TOP=6;
 /* Cross-links run in their own lane, below every sibling bus (which sit at
    +5 and +56 under a box) and still clear of the next generation. Sharing a
@@ -350,19 +343,15 @@ const PHOTO_TOP=6;
    short one reads as a single continuous bus. */
 const CROSS_LANE=88, CROSS_STEP=8, HOP=4;
 let hasPhotos=false;
-/* Below ZOOM_OUT we go compact, above ZOOM_IN we go back; the gap between
-   them is what stops the mode flapping while the wheel is turning. */
-const ZOOM_OUT=.62, ZOOM_IN=.72;
-let mode="full", BOX_H, GEN_H, DESC_LINES, DROP, PHOTO_R, PHOTO_BAND;
-function setMode(m){
-  mode=m;
-  ({BOX_H,GEN_H,DESC_LINES,PHOTO_R}=DETAIL[m]);
+let BOX_H, GEN_H, DROP, PHOTO_BAND;
+/* The only thing that still varies is whether the sheet has photos in it, and
+   that can change once, when the rows arrive. */
+function setMetrics(){
   PHOTO_BAND=hasPhotos?PHOTO_TOP+PHOTO_R*2:0;
-  BOX_H+=PHOTO_BAND; GEN_H+=PHOTO_BAND;
-  /* the sibling bus hangs just below the boxes it leaves */
-  DROP=BOX_H/2+5;
+  BOX_H=BOX_BASE+PHOTO_BAND; GEN_H=GEN_BASE+PHOTO_BAND;
+  DROP=BOX_H/2+5;                  /* the sibling bus hangs just below the boxes */
 }
-setMode("full");
+setMetrics();
 
 /* ---- RFC4180 CSV parser ----
    Nothing in the page calls this any more: the sheet arrives as a DataTable,
@@ -779,7 +768,7 @@ function hops(x0,x1,y,verticals){
 }
 
 function render(){
-  setMode(mode);                    /* photos may have appeared since load */
+  setMetrics();                     /* photos may have appeared since load */
   totalW=layout();
   const maxGen=Math.max(...[...P.values()].map(p=>p.gen));
   totalH=(maxGen-1)*GEN_H+PAD*2+BOX_H;
@@ -887,8 +876,7 @@ function render(){
         /* initials keep the row visually even for people with no photo yet */
         g.appendChild(el("circle",{cx,cy,r:PHOTO_R,class:"avatar-blank"}));
         /* baseline offset follows the type size, which follows the circle */
-        const ini=el("text",{x:cx,y:cy+(mode==="compact"?4:7),
-          "text-anchor":"middle",class:"initials"});
+        const ini=el("text",{x:cx,y:cy+7,"text-anchor":"middle",class:"initials"});
         ini.textContent=initials(p.name);
         g.appendChild(ini);
       }
@@ -921,7 +909,6 @@ function render(){
     nodes.appendChild(g);
   }
 
-  svg.classList.toggle("compact",mode==="compact");
   showIssues();
   repaint();
 }
@@ -931,36 +918,36 @@ function render(){
    reaches a person group, which is what made selection unreliable. */
 function apply(){ root.setAttribute("transform",`translate(${view.x} ${view.y}) scale(${view.k})`); }
 
-/* Level of detail follows the zoom. Re-rendering is cheap at this size, and
-   only heights change, so the tree is pinned by whatever sits in the middle
-   of the viewport rather than jumping to a new place. */
-function wantMode(k){ return k<ZOOM_OUT?"compact":k>ZOOM_IN?"full":mode; }
-function maybeSwitch(){
-  const want=wantMode(view.k);
-  if(want===mode) return;
-  const r=svg.getBoundingClientRect(), oldH=totalH;
-  const cy=(r.height/2-view.y)/view.k;
-  setMode(want); render();
-  view.y=r.height/2-cy*(oldH?totalH/oldH:1)*view.k;
-}
 /* On a phone the whole chart at once is a grey smear about five pixels tall,
    and a "fit" that fits everything and shows nothing is worse than one that
    stops at the smallest size still worth looking at and lets you pan. */
 const NARROW = () => window.innerWidth<=860;   /* keep in step with the media query */
 function fit(){
-  for(let i=0;i<2;i++){
-    const r=svg.getBoundingClientRect();
-    const k=Math.max(NARROW()?.3:0,
-      Math.min(r.width/(totalW+40), r.height/(totalH+40), 1));
-    const want=wantMode(k);
-    if(want!==mode){ setMode(want); render(); continue; }
-    view.k=k;
-    view.x=(r.width-totalW*k)/2;
-    view.y=(r.height-totalH*k)/2;
-    break;
-  }
+  const r=svg.getBoundingClientRect();
+  view.k=Math.max(NARROW()?.3:0,
+    Math.min(r.width/(totalW+40), r.height/(totalH+40), 1));
+  view.x=(r.width-totalW*view.k)/2;
+  view.y=(r.height-totalH*view.k)/2;
   apply();
 }
+/* Frame a set of people, centred in what the panel leaves of the viewport
+   rather than in the whole of it. */
+const FRAME_PAD=56;
+function fitTo(people){
+  if(!people.length) return;
+  const r=svg.getBoundingClientRect();
+  const open=panel.classList.contains("open");
+  const w=r.width-(open&&!NARROW()?panel.offsetWidth:0);
+  const h=r.height-(open&&NARROW()?panel.offsetHeight:0);
+  const x0=Math.min(...people.map(p=>p.x)), x1=Math.max(...people.map(p=>p.x+BOX_W));
+  const y0=Math.min(...people.map(p=>p.y)), y1=Math.max(...people.map(p=>p.y+BOX_H));
+  view.k=Math.min(K_MAX,Math.max(K_MIN,Math.min(
+    (w-FRAME_PAD*2)/(x1-x0), (h-FRAME_PAD*2)/(y1-y0), 1)));
+  view.x=(w-(x1-x0)*view.k)/2-x0*view.k;
+  view.y=(h-(y1-y0)*view.k)/2-y0*view.k;
+  apply();
+}
+
 /* Where a phone opens: readable rather than complete, over the middle of the
    oldest generation, with the rest a pan away. A permalink overrides this,
    because openHash() runs after it. */
@@ -973,7 +960,7 @@ function startView(){
     .sort((a,b)=>a.gen-b.gen||a.x-b.x)[0];
   if(!first) return;
   const r=svg.getBoundingClientRect();
-  view.k=.8; maybeSwitch();
+  view.k=.8;
   view.x=r.width/2-(first.x+BOX_W/2)*view.k;
   view.y=20-(first.y-20)*view.k;
   apply();
@@ -1001,7 +988,7 @@ function focusOn(id){
   const r=svg.getBoundingClientRect();
   /* centre in what the sheet leaves of the chart, not in the whole viewport */
   const h=r.height-(NARROW()&&panel.classList.contains("open")?panel.offsetHeight:0);
-  view.k=1; maybeSwitch();
+  view.k=1;
   view.x=r.width/2-(p.x+BOX_W/2)*view.k;
   view.y=h/2-(p.y+BOX_H/2)*view.k;
   apply();
@@ -1017,7 +1004,7 @@ function zoomAbout(k,mx,my){
   k=Math.min(K_MAX,Math.max(K_MIN,k));
   view.x=mx-(mx-view.x)*(k/view.k);
   view.y=my-(my-view.y)*(k/view.k);
-  view.k=k; maybeSwitch(); apply();
+  view.k=k; apply();
 }
 function span(){
   const [a,b]=[...pointers.values()];
@@ -1047,9 +1034,6 @@ window.addEventListener("pointermove",e=>{
        two fingers pan and scale at once */
     view.k=Math.min(K_MAX,Math.max(K_MIN,pinch.k0*t.d/pinch.d));
     view.x=mx-pinch.wx*view.k; view.y=my-pinch.wy*view.k;
-    const was=mode; maybeSwitch();
-    /* a detail switch changes every height, so re-anchor rather than fight it */
-    if(mode!==was) pinch.wy=(my-view.y)/view.k;
     apply();
     return;
   }
@@ -1384,7 +1368,7 @@ document.addEventListener("keydown",e=>{
 /* A click on a person means "compare" while picking, "select" otherwise.
    Picking no longer ends with the pick — the toggle is what ends it.
 
-   Clicking the same person twice always means undo, in either mode: on the
+   Clicking the same person twice always means undo, armed or not: on the
    selected person it dismisses the panel and clears the selection (select()
    does that), and on the person being compared it drops the answer and waits
    for the next pick. */
@@ -1417,8 +1401,27 @@ document.addEventListener("click",e=>{
   clearSelection();
 });
 
-/* ---- search ---- */
-document.getElementById("find").addEventListener("input",repaint);
+/* ---- search ----
+   Marking the hits is no use if they are somewhere off the left edge, so the
+   view goes to the smallest rectangle that holds all of them. It moves only
+   when the set of hits actually changes: typing the rest of a name that
+   already matched one person would otherwise jerk the chart on every
+   keystroke. */
+let lastHits="";
+function findHits(){
+  const q=document.getElementById("find").value.trim().toLowerCase();
+  return q?[...P.values()].filter(p=>p.x!=null&&label(p).toLowerCase().includes(q)):[];
+}
+function onFind(){
+  repaint();
+  const hits=findHits(), sig=hits.map(p=>p.id).join("|");
+  if(sig===lastHits) return;
+  lastHits=sig;
+  /* an empty box or a typo leaves the view alone — yanking it somewhere on the
+     way to a name nobody has is worse than staying put */
+  if(hits.length) fitTo(hits);
+}
+document.getElementById("find").addEventListener("input",onFind);
 
 /* ---- validation surface ---- */
 function showIssues(){
