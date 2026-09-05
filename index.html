@@ -1,0 +1,1498 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Family Tree</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Newsreader:ital,opsz,wght@0,6..72,300;0,6..72,400;0,6..72,500;1,6..72,300;1,6..72,400&display=swap" rel="stylesheet">
+<style>
+:root{
+  --paper:#EDEEE9; --card:#FBFBF9; --ink:#1F2421; --muted:#6B7268;
+  --rule:#9AA096; --hair:#C8CCC4; --pine:#2E6B4F; --brick:#A6564A;
+  /* the selection reads against pine lineage, not with it */
+  --marine:#12557F;
+  --band:#E6E8E1;
+  --male:#DAE6F0; --female:#F2DEE5; --nosex:#F1F0EA;
+  --male-ink:#274257; --female-ink:#5C2B3C;
+}
+*{box-sizing:border-box}
+html,body{margin:0;height:100%;overscroll-behavior:none;-webkit-text-size-adjust:100%}
+body{
+  background:var(--paper); color:var(--ink);
+  font-family:"Newsreader",Georgia,serif; font-weight:400;
+  font-variant-numeric:tabular-nums;
+  -webkit-font-smoothing:antialiased;
+  display:flex; flex-direction:column; overflow:hidden;
+}
+header{
+  flex:none; display:flex; align-items:baseline; gap:1.5rem;
+  padding:.85rem 1.25rem; border-bottom:1px solid var(--hair); background:var(--card);
+}
+h1{font-size:1.15rem; font-weight:500; margin:0; letter-spacing:.01em}
+h1 span{color:var(--muted); font-weight:300; font-style:italic}
+.tools{margin-left:auto; display:flex; align-items:center; gap:.6rem}
+input[type=search]{
+  font-family:inherit; font-size:.9rem; color:var(--ink); background:var(--paper);
+  border:1px solid var(--hair); border-radius:2px; padding:.34rem .6rem; width:14rem;
+}
+input[type=search]:focus{outline:2px solid var(--pine); outline-offset:1px; border-color:transparent}
+button{
+  font-family:inherit; font-size:.88rem; color:var(--ink); cursor:pointer; background:var(--paper);
+  border:1px solid var(--hair); border-radius:2px; padding:.34rem .7rem;
+}
+button:hover{border-color:var(--rule)}
+button:focus-visible{outline:2px solid var(--pine); outline-offset:1px}
+#warn{color:var(--brick); font-size:.85rem; font-style:italic; cursor:pointer; background:none; border:none; padding:0}
+#warn[hidden]{display:none}
+main{flex:1; position:relative; overflow:hidden}
+#stage{width:100%; height:100%; display:block; cursor:grab; touch-action:none}
+#stage.drag{cursor:grabbing}
+.gen-band{fill:var(--band)}
+.box{stroke:var(--rule); stroke-width:.75}
+.box.m{fill:var(--male)}
+.box.f{fill:var(--female)}
+.box.u{fill:var(--nosex)}
+.nm{fill:var(--ink); font-size:13.5px; font-weight:500}
+.yr{fill:var(--muted); font-size:10.5px}
+.desc{fill:var(--muted); font-size:10.5px}
+/* compact boxes are read at low zoom, so the name carries a little more weight */
+.compact .nm{font-size:15px}
+.compact .yr{font-size:9.5px}
+.avatar-blank{fill:var(--band)}
+.avatar-ring{fill:none; stroke:var(--rule); stroke-width:.75}
+.initials{fill:var(--muted); font-size:20px; text-anchor:middle}
+.compact .initials{font-size:12px}
+.divider{stroke:var(--rule); stroke-width:.5; opacity:.45}
+.link{stroke:var(--rule); stroke-width:1; fill:none}
+.link.cross{stroke:var(--rule)}
+/* The selected person's line of descent, drawn over the sage rules in its own
+   layer under the boxes. A cross-link is one path for one child, so it can be
+   lit in place instead. */
+.lit-link{fill:none; stroke:var(--pine); stroke-width:2.25; stroke-linecap:round}
+.link.lit{stroke:var(--pine); stroke-width:2.25}
+.person{cursor:pointer}
+.person .hit{fill:transparent}
+/* A clicked person keeps DOM focus, and the UA's own ring for that is a blue
+   rectangle that outlives the selection — it was still sitting there after the
+   panel closed. The box stroke below is the focus cue instead, and it only
+   fires for :focus-visible, so the mouse never draws a ring at all. */
+.person:focus{outline:none}
+.person:focus-visible .box{stroke:var(--pine); stroke-width:2}
+.dim{opacity:.45}
+.hit-match .box{stroke:var(--pine); stroke-width:2}
+/* Ancestors and siblings sit between an ordinary box and the selected one:
+   heavy enough to read as a run up the chart, light enough that the selection
+   still leads. */
+.kin .box{stroke:var(--pine); stroke-width:1.75}
+/* Marine, not pine: the person you clicked has to be findable inside the pine
+   run of their own ancestry, which is otherwise the same colour at nearly the
+   same weight. */
+.sel .box{stroke:var(--marine); stroke-width:2.75}
+/* Both ends of a comparison are marked the same way — a second colour said
+   nothing the panel's sentence doesn't already say. */
+.cmp .box{stroke:var(--marine); stroke-width:2.25}
+#stage.picking{cursor:crosshair}
+.panel-tools{margin:0 0 .9rem; display:flex; gap:.4rem; flex-wrap:wrap}
+button.quiet{font-size:.8rem; padding:.24rem .55rem; color:var(--muted)}
+button.quiet:hover{color:var(--ink)}
+/* The relate button is a toggle, so it has to look held down while it is on. */
+button.quiet[aria-pressed="true"]{
+  color:var(--card); background:var(--pine); border-color:var(--pine);
+}
+button.quiet[aria-pressed="true"]:hover{color:var(--card)}
+.relout{
+  margin:0 0 1.2rem; padding:.6rem .75rem; font-size:.92rem; line-height:1.45;
+  background:var(--paper); border-left:2px solid var(--pine);
+}
+.relout[hidden]{display:none}
+.relout em{font-style:normal; font-weight:500}
+/* Not .hint — that class is the setup card's brick-red error line, and it
+   carries !important. */
+.relout .again{display:block; margin-top:.35rem; font-size:.82rem; color:var(--muted)}
+aside{
+  position:absolute; top:0; right:0; bottom:0; width:23rem; max-width:88vw;
+  background:var(--card); border-left:1px solid var(--hair);
+  padding:1.4rem 1.5rem; overflow-y:auto;
+  transform:translateX(100%); transition:transform .22s ease;
+}
+aside.open{transform:none}
+@media (prefers-reduced-motion:reduce){aside{transition:none}}
+
+/* ---- phones ----
+   A 4,000px chart and a 390px screen have no scale in common, so the work here
+   is making the frame get out of the way: the panel becomes a sheet so the
+   chart stays visible above it, the header wraps instead of squeezing the
+   search box, and the search box goes to 16px because anything smaller makes
+   iOS zoom the whole page the moment it is focused. */
+/* 860px, and NARROW() in the script has to say the same number: the script
+   measures the sheet to keep a selected person clear of it, and would measure
+   a side panel that isn't there if the two disagreed. */
+@media (max-width:860px){
+  header{gap:.5rem .8rem; padding:.6rem .8rem; flex-wrap:wrap; align-items:center}
+  h1{font-size:1rem}
+  .tools{width:100%; margin-left:0; gap:.4rem}
+  input[type=search]{flex:1; width:auto; font-size:16px}
+  button{font-size:.9rem; padding:.42rem .7rem}
+  aside{
+    top:auto; left:0; right:0; bottom:0; width:auto; max-width:none;
+    /* 52vh, not more: the strip left above the sheet still has to hold a
+       full-detail box, or selecting someone hides them */
+    height:auto; max-height:52vh; padding:1.1rem 1.1rem 1.5rem;
+    border-left:none; border-top:1px solid var(--hair);
+    transform:translateY(100%);
+  }
+  aside.open{transform:none}
+  aside .close{top:.6rem; right:.7rem; font-size:1.5rem; padding:.3rem .5rem}
+  #pPhoto{max-width:8rem}
+  footer{padding:.45rem .8rem; gap:.8rem; font-size:.76rem}
+  #issues{left:.6rem; right:.6rem; bottom:.6rem; max-width:none}
+  #setup{padding:1.2rem 1.2rem}
+}
+#pPhoto{
+  display:block; width:100%; aspect-ratio:1; object-fit:cover;
+  border-radius:2px; margin:0 0 .9rem; background:var(--band);
+}
+#pPhoto[hidden]{display:none}
+aside h2{font-size:1.5rem; font-weight:400; margin:0 0 .1rem; line-height:1.15}
+.sub{color:var(--muted); font-style:italic; margin:0 0 1.1rem; font-size:.95rem}
+.desc-full{font-size:1rem; line-height:1.65; margin:0 0 1.4rem; max-width:34ch}
+dl{margin:0; font-size:.92rem; line-height:1.6}
+dt{color:var(--muted); font-style:italic; margin-top:.7rem}
+dd{margin:.05rem 0 0}
+dd a{color:var(--pine); text-decoration:none; border-bottom:1px solid var(--hair); cursor:pointer}
+dd a:hover{border-color:var(--pine)}
+.close{position:absolute; top:1rem; right:1.1rem; border:none; background:none; font-size:1.3rem; line-height:1; padding:.2rem .4rem; color:var(--muted)}
+footer{
+  flex:none; display:flex; gap:1.4rem; align-items:center; flex-wrap:wrap;
+  padding:.55rem 1.25rem; border-top:1px solid var(--hair);
+  background:var(--card); font-size:.82rem; color:var(--muted);
+}
+#issues{
+  position:absolute; left:1.25rem; bottom:1.25rem; max-width:30rem;
+  background:var(--card); border:1px solid var(--brick); border-radius:2px;
+  padding:.9rem 1.1rem; font-size:.88rem; line-height:1.55;
+}
+#issues[hidden]{display:none}
+#issues h3{margin:0 0 .4rem; font-size:.95rem; font-weight:500; color:var(--brick)}
+#issues ul{margin:0; padding-left:1.1rem}
+#setup{
+  position:absolute; top:50%; left:50%; transform:translate(-50%,-50%);
+  width:min(30rem,88vw); background:var(--card);
+  border:1px solid var(--hair); border-radius:2px;
+  padding:1.6rem 1.7rem; font-size:.92rem; line-height:1.6;
+}
+#setup[hidden]{display:none}
+#setup h3{margin:0 0 .3rem; font-size:1.25rem; font-weight:400}
+#setup p{margin:0 0 1rem; color:var(--muted)}
+#setup code{font-size:.85em; background:var(--paper); padding:.05rem .25rem; white-space:nowrap}
+#setupForm{display:flex; gap:.4rem}
+#setupForm input{
+  flex:1; font-family:inherit; font-size:.88rem; color:var(--ink);
+  background:var(--paper); border:1px solid var(--hair);
+  border-radius:2px; padding:.36rem .5rem;
+}
+#setupForm input:focus-visible{outline:2px solid var(--pine); outline-offset:1px}
+#setup .close{top:.7rem; right:.8rem; font-size:1.15rem}
+#setup .close[hidden]{display:none}
+.linky{
+  font-family:inherit; font-size:inherit; color:var(--pine); background:none;
+  border:none; border-bottom:1px solid var(--hair); border-radius:0;
+  padding:0; cursor:pointer;
+}
+.linky:hover{border-color:var(--pine)}
+#demoNote[hidden]{display:none}
+.hint{margin:.9rem 0 0 !important; color:var(--brick) !important; font-style:italic}
+.hint:empty{display:none}
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Family Tree</h1>
+  <button id="warn" hidden></button>
+  <div class="tools">
+    <input type="search" id="find" placeholder="Find a name" aria-label="Find a name">
+    <button id="fit">Fit to screen</button>
+  </div>
+</header>
+
+<main>
+  <svg id="stage" role="img" aria-label="Family chart"></svg>
+  <aside id="panel" aria-live="polite">
+    <button class="close" id="closePanel" aria-label="Close">&times;</button>
+    <img id="pPhoto" alt="" hidden>
+    <h2 id="pName"></h2>
+    <p class="sub" id="pSub"></p>
+    <p class="desc-full" id="pDesc"></p>
+    <p class="panel-tools">
+      <button class="quiet" id="relateBtn">How are we related?</button>
+      <button class="quiet" id="copyLink">Copy link</button>
+    </p>
+    <p class="relout" id="relOut" hidden></p>
+    <dl id="pRel"></dl>
+  </aside>
+  <div id="setup" hidden>
+    <button class="close" id="setupClose" aria-label="Close" hidden>&times;</button>
+    <h3>Point this at a sheet</h3>
+    <p>Paste the link to the Google Sheet holding the family, or add
+       <code>?sheet=…</code> to this page's address.</p>
+    <form id="setupForm">
+      <input type="text" id="sheetInput" autocomplete="off"
+             placeholder="https://docs.google.com/spreadsheets/d/…"
+             aria-label="Google Sheet link">
+      <button type="submit">Open</button>
+    </form>
+    <p class="hint" id="setupHint"></p>
+  </div>
+  <div id="issues" hidden>
+    <h3>Check the sheet</h3>
+    <ul id="issueList"></ul>
+  </div>
+</main>
+
+<footer>
+  <span>Drag to pan, pinch or scroll to zoom, tap anyone to read more.</span>
+  <span id="demoNote" hidden>This is a made-up family.
+    <button class="linky" id="useOwn">Open your own sheet</button></span>
+</footer>
+
+<script>
+/* ------------------------------------------------------------------
+   CONFIG. One tab, one row per person. Sheet must be shared as
+   "anyone with the link can view".
+
+   Columns: name, sex, birth_year, death_year, parents, drive_photo, description
+
+   drive_photo is named for the workflow it is meant for: paste a Google
+   Drive share link (any of Drive's shapes) or a bare Drive file id, and it
+   is rewritten to the thumbnail host at PHOTO_PX wide, so the page pulls a
+   thumbnail rather than someone's 4MB phone original. A URL on any other
+   host, or a filename sitting next to this page, is used exactly as written
+   — but then nothing downsizes it, which is why the column steers to Drive.
+
+   The name is the identifier, so names must be unique. Parents are the two
+   names in one cell, comma separated ("Ada Rivera, Peter Rivera"), or a
+   single name for a single parent. Matching ignores case and extra spaces,
+   and the two names in either order are the same couple.
+
+   A couple is created by any parents cell that names it, so most couples
+   need nothing of their own. A couple with no children between them is a
+   row with the parents cell filled in and everything else, name included,
+   left empty.
+
+   A row whose name begins with # is a comment and is skipped entirely.
+
+   Generations are always inferred from the parents cells.
+
+   The sheet is named by the ?sheet= parameter rather than being baked in,
+   so this file holds no family data and no pointer to any real family. Paste
+   either the id or the whole Google Sheets URL. With no parameter you get the
+   demo family, and the footer offers the setup form.
+------------------------------------------------------------------- */
+function sheetFromURL(){
+  const raw=(new URLSearchParams(location.search).get("sheet")||"").trim();
+  const m=raw.match(/\/spreadsheets\/d\/([A-Za-z0-9_-]+)/);
+  return (m?m[1]:raw).replace(/[^A-Za-z0-9_-]/g,"");
+}
+const SHEET_ID   = sheetFromURL();
+/* With no ?sheet= the page opens on an invented family in a public sheet,
+   because an empty form explains nothing about what this is. It is a demo, not
+   a fallback: a named sheet always wins, and a sheet that fails to load still
+   gets the form and the error rather than quietly showing this instead. The
+   footer says whose family you are looking at, so nobody mistakes it for
+   theirs. */
+const DEMO_SHEET = "1KRuUCQeWoyse0XSdkUEPW0iXMEvhdAdHm_LkFNY5gfo";
+const isDemo     = !SHEET_ID;
+const PEOPLE_TAB = "People";
+/* JSONP rather than fetch: script tags ignore CORS, so this works when the
+   page is opened straight off disk as well as when it is hosted. */
+const gviz = (id, tab, cb) =>
+  `https://docs.google.com/spreadsheets/d/${id}/gviz/tq` +
+  `?tqx=out:json;responseHandler:${cb}&headers=1` +
+  (tab?`&sheet=${encodeURIComponent(tab)}`:"");
+
+/* ---- geometry ---- */
+const BOX_W=152, PAIR_GAP=30, SIB_GAP=26, GROUP_GAP=44,
+      SOLO_DROP=56, PAD=70, GUTTER=50, DESC_CHARS=27;
+
+/* Two levels of detail. Zoomed out, ten lines of description per box are an
+   unreadable grey smear and the chart is needlessly tall, so boxes collapse
+   to a name and a date range. Only the heights differ: x positions depend on
+   BOX_W alone, so switching modes slides the tree vertically and nothing
+   moves sideways. */
+const DETAIL={
+  full:   {BOX_H:176, GEN_H:300, DESC_LINES:10, PHOTO_R:32},
+  compact:{BOX_H:44,  GEN_H:168, DESC_LINES:0,  PHOTO_R:18}
+};
+/* Room for a face at the top of a box, added only when the sheet actually has
+   photos in it — until the first one is filled in, nobody pays for the empty
+   band. A compact box keeps its face at a smaller radius: the description is
+   what makes a zoomed-out box unreadable, a face at any size is still a face,
+   and it is usually the fastest way to find someone from across the chart. */
+const PHOTO_TOP=6;
+/* Cross-links run in their own lane, below every sibling bus (which sit at
+   +5 and +56 under a box) and still clear of the next generation. Sharing a
+   y with a bus is what made them unreadable: a long line lying exactly on a
+   short one reads as a single continuous bus. */
+const CROSS_LANE=88, CROSS_STEP=8, HOP=4;
+let hasPhotos=false;
+/* Below ZOOM_OUT we go compact, above ZOOM_IN we go back; the gap between
+   them is what stops the mode flapping while the wheel is turning. */
+const ZOOM_OUT=.62, ZOOM_IN=.72;
+let mode="full", BOX_H, GEN_H, DESC_LINES, DROP, PHOTO_R, PHOTO_BAND;
+function setMode(m){
+  mode=m;
+  ({BOX_H,GEN_H,DESC_LINES,PHOTO_R}=DETAIL[m]);
+  PHOTO_BAND=hasPhotos?PHOTO_TOP+PHOTO_R*2:0;
+  BOX_H+=PHOTO_BAND; GEN_H+=PHOTO_BAND;
+  /* the sibling bus hangs just below the boxes it leaves */
+  DROP=BOX_H/2+5;
+}
+setMode("full");
+
+/* ---- RFC4180 CSV parser ----
+   Nothing in the page calls this any more: the sheet arrives as a DataTable,
+   not CSV. It stays because family.csv is fed through it by the headless
+   layout tests, and because it is what any future import path would use. */
+function parseCSV(text){
+  const rows=[]; let row=[], field="", q=false;
+  text=text.replace(/\r\n?/g,"\n");
+  for(let i=0;i<text.length;i++){
+    const c=text[i];
+    if(q){
+      if(c==='"'){ if(text[i+1]==='"'){field+='"';i++;} else q=false; }
+      else field+=c;
+    } else if(c==='"') q=true;
+    else if(c===","){ row.push(field); field=""; }
+    else if(c==="\n"){ row.push(field); rows.push(row); row=[]; field=""; }
+    else field+=c;
+  }
+  if(field.length||row.length){ row.push(field); rows.push(row); }
+  if(!rows.length) return [];
+  const head=rows.shift().map(h=>h.trim().toLowerCase());
+  return rows.filter(r=>r.some(c=>c.trim()!==""))
+             .map(r=>Object.fromEntries(head.map((h,i)=>[h,(r[i]??"").trim()])));
+}
+
+/* ---- photos ----
+   Drive hands out several link shapes and family members will paste whichever
+   one they got. Pull the id out of any of them and ask the thumbnail host for
+   a width; anything that isn't a Drive link is used exactly as written, so a
+   plain URL or a file sitting next to this page both work. */
+const DRIVE_HOST=/(?:drive|docs)\.google\.com/i;
+const DRIVE_ID=/(?:\/d\/|[?&]id=|^)([A-Za-z0-9_-]{20,})/;
+/* One size for both the chart avatar and the panel, so the two share a cache
+   entry and each face is fetched once. 640 is sized for the panel on a 2x
+   display, which leaves the 44px avatar with more pixels than it needs —
+   deliberately, since the avatar is what someone zooms in on. */
+const PHOTO_PX=640;
+function photoURL(raw){
+  const v=(raw||"").trim();
+  if(!v) return "";
+  const drive=DRIVE_HOST.test(v);
+  if(/^https?:\/\//i.test(v)&&!drive) return v;
+  const m=v.match(DRIVE_ID);
+  /* a bare id has no dot or slash in it; a filename does */
+  if(m&&(drive||!/[\/.]/.test(v)))
+    return `https://lh3.googleusercontent.com/d/${m[1]}=w${PHOTO_PX}`;
+  return v;
+}
+const initials = name => (name||"").trim().split(/\s+/).slice(0,2)
+  .map(w=>w[0]||"").join("").toUpperCase();
+
+/* ---- greedy word wrap, since SVG text does not wrap on its own ---- */
+function wrap(text,maxChars,maxLines){
+  if(maxLines<1) return [];
+  const words=(text||"").trim().split(/\s+/).filter(Boolean);
+  if(!words.length) return [];
+  const lines=[]; let cur="", i=0;
+  for(;i<words.length;i++){
+    const t=cur?cur+" "+words[i]:words[i];
+    if(t.length<=maxChars){ cur=t; continue; }
+    lines.push(cur||words[i]);
+    cur=cur?words[i]:"";
+    if(lines.length===maxLines) break;
+  }
+  if(cur&&lines.length<maxLines) lines.push(cur);
+  const shown=lines.join(" ").length;
+  if(shown<(text||"").trim().length)
+    lines[lines.length-1]=lines[lines.length-1].replace(/[.,;:—-]+$/,"")+"…";
+  return lines;
+}
+
+/* ---- model ---- */
+let P=new Map(), U=new Map(), kidsOf=new Map(), issues=[];
+
+/* ---- identity helpers ----
+   Names are the identifiers, so matching has to survive the ways a person
+   types the same name twice: stray spaces, a different capitalisation, or
+   the two halves of a couple written in the other order. */
+const key   = s => (s||"").trim().replace(/\s+/g," ").toLowerCase();
+const names = s => (s||"").split(",").map(x=>x.trim()).filter(Boolean);
+const coupleId = list => list.map(key).sort().join(", ");
+
+function buildModel(rows){
+  P=new Map(); U=new Map(); kidsOf=new Map(); issues=[]; let seq=0;
+
+  /* A named row is a person. A nameless row carrying only a parents cell
+     declares a couple who have no children between them — without it they
+     would never be mentioned anywhere and would not be drawn. */
+  const personRows=[], coupleRows=[];
+  for(const r of rows){
+    const nm=(r.name||"").trim();
+    const parents=(r.parents||"").trim();
+    /* A name starting with # is a note to whoever is editing the sheet — where
+       this page's source lives, a reminder about how the parents column works,
+       a heading over the next block of rows. The whole row is skipped, not
+       just the name, so the other columns are free for the note to run into,
+       and it is skipped before validation, so a note never reads as a person
+       with a missing surname. */
+    if(nm.startsWith("#")) continue;
+    if(nm) personRows.push({...r,name:nm,parents});
+    else if(parents) coupleRows.push(parents);
+    else if(Object.values(r).some(v=>v!==""))
+      issues.push("A row has no name and no parents, so it was skipped.");
+  }
+
+  for(const r of personRows){
+    const id=key(r.name);
+    if(P.has(id)){
+      issues.push(`Two rows are named ${r.name}. Names identify people here, so they have to be unique.`);
+      continue;
+    }
+    P.set(id,{
+      id, name:r.name, sex:(r.sex||"").toUpperCase().charAt(0),
+      birth:r.birth_year||"", death:r.death_year||"",
+      parentsRaw:r.parents, description:r.description||"",
+      photo:(r.drive_photo||"").trim(),
+      parentUnion:"", unions:[], gen:0
+    });
+  }
+
+  /* Unions are keyed on the pair, so a couple written in either order in a
+     parents cell lands on the union the couple's own row created. */
+  const union=(list,written)=>{
+    const id=coupleId(list);
+    let u=U.get(id);
+    if(!u){
+      u={id, a:key(list[0]||""), b:key(list[1]||""), written:list, label:written, seq:seq++};
+      U.set(id,u); kidsOf.set(id,[]);
+    }
+    return u;
+  };
+  for(const raw of coupleRows){
+    const list=names(raw);
+    if(list.length>2){ issues.push(`"${raw}" names more than two people.`); continue; }
+    union(list,raw);
+  }
+  for(const p of P.values()){
+    if(!p.parentsRaw) continue;
+    const list=names(p.parentsRaw);
+    if(!list.length){ issues.push(`${label(p)} has a parents cell that names nobody.`); continue; }
+    if(list.length>2){ issues.push(`${label(p)} lists more than two parents.`); continue; }
+    p.parentUnion=union(list,p.parentsRaw).id;
+  }
+
+  for(const u of U.values())
+    for(const written of u.written)
+      if(!P.has(key(written)))
+        issues.push(`"${u.label}" names ${written}, who has no row of their own.`);
+
+  for(const u of U.values()){
+    for(const side of ["a","b"]){
+      const id=u[side];
+      if(id&&P.has(id)) P.get(id).unions.push(u.id);
+    }
+  }
+  for(const p of P.values())
+    if(p.parentUnion&&kidsOf.has(p.parentUnion)) kidsOf.get(p.parentUnion).push(p.id);
+
+  /* No marriage years any more, so a person's unions keep sheet order and
+     children are ordered by birth year. */
+  for(const p of P.values())
+    p.unions.sort((x,y)=>U.get(x).seq-U.get(y).seq);
+  for(const list of kidsOf.values())
+    list.sort((x,y)=>(+P.get(x).birth||9999)-(+P.get(y).birth||9999));
+
+  hasPhotos=[...P.values()].some(p=>p.photo);
+  assignGenerations();
+}
+
+const label = p => p && (p.name || p.id) || "";
+
+function assignGenerations(){
+  for(const p of P.values()) p.gen=0;
+  for(let pass=0;pass<60;pass++){
+    let moved=false;
+    for(const p of P.values()){
+      const u=U.get(p.parentUnion); if(!u) continue;
+      const pg=[u.a,u.b].filter(id=>P.has(id)).map(id=>P.get(id).gen);
+      if(!pg.length) continue;
+      const want=Math.max(...pg)+1;
+      if(p.gen<want){p.gen=want;moved=true;}
+    }
+    for(const u of U.values()){
+      const a=P.get(u.a), b=P.get(u.b);
+      if(!a||!b) continue;
+      const m=Math.max(a.gen,b.gen);
+      if(!a.parentUnion&&a.gen<m){a.gen=m;moved=true;}
+      if(!b.parentUnion&&b.gen<m){b.gen=m;moved=true;}
+    }
+    if(!moved) break;
+  }
+  normalise();
+}
+function normalise(){
+  const min=Math.min(...[...P.values()].map(p=>p.gen));
+  for(const p of P.values()) p.gen-=min-1;
+}
+
+/* ---- chains: a person plus everyone they are or were partnered with ---- */
+let chains=[], chainOf=new Map();
+function buildChains(){
+  chains=[]; chainOf=new Map();
+  const adj=new Map();
+  for(const id of P.keys()) adj.set(id,[]);
+  for(const u of U.values())
+    if(P.has(u.a)&&P.has(u.b)){ adj.get(u.a).push(u.b); adj.get(u.b).push(u.a); }
+
+  const seen=new Set();
+  for(const id of P.keys()){
+    if(seen.has(id)) continue;
+    const comp=[], stack=[id]; seen.add(id);
+    while(stack.length){
+      const c=stack.pop(); comp.push(c);
+      for(const n of adj.get(c)) if(!seen.has(n)){seen.add(n);stack.push(n);}
+    }
+    const members=orderChain(comp,adj);
+    const ci=chains.length;
+    chains.push({i:ci,members,unions:chainUnions(members)});
+    for(const m of members) chainOf.set(m,ci);
+  }
+}
+function orderChain(comp,adj){
+  if(comp.length<3)
+    return comp.slice().sort((a,b)=>(+P.get(a).birth||0)-(+P.get(b).birth||0));
+  const ends=comp.filter(c=>adj.get(c).filter(n=>comp.includes(n)).length===1);
+  const seqAt=id=>Math.min(...P.get(id).unions.map(u=>U.get(u).seq));
+  const start=ends.length?ends.slice().sort((x,y)=>seqAt(x)-seqAt(y))[0]:comp[0];
+  const out=[start], used=new Set([start]);
+  while(out.length<comp.length){
+    const last=out[out.length-1];
+    const next=adj.get(last).find(n=>comp.includes(n)&&!used.has(n));
+    if(!next) break;
+    out.push(next); used.add(next);
+  }
+  for(const c of comp) if(!used.has(c)) out.push(c);
+  return out;
+}
+function chainUnions(members){
+  const out=[], set=new Set();
+  for(const m of members)
+    for(const uid of P.get(m).unions)
+      if(!set.has(uid)){set.add(uid);out.push(uid);}
+  return out;
+}
+
+/* ---- layout: claim, measure, place ---- */
+let tree=[], crossLinks=[];
+function layout(){
+  buildChains();
+  const claimed=new Set(); crossLinks=[]; tree=[];
+
+  function claim(ci){
+    if(claimed.has(ci)) return null;
+    claimed.add(ci);
+    const node={ci,groups:[]};
+    for(const uid of chains[ci].unions){
+      const g={uid,kids:[]};
+      for(const kid of kidsOf.get(uid)||[]){
+        const child=claim(chainOf.get(kid));
+        if(child) g.kids.push({node:child,anchor:kid});
+        else crossLinks.push({uid,kid});
+      }
+      node.groups.push(g);
+    }
+    return node;
+  }
+
+  const minGen=Math.min(...[...P.values()].map(p=>p.gen));
+  const roots=chains
+    .filter(c=>c.members.some(m=>P.get(m).gen===minGen&&!P.get(m).parentUnion))
+    .map(c=>c.i);
+  for(const ci of roots){const n=claim(ci); if(n) tree.push(n);}
+  for(const c of chains){const n=claim(c.i); if(n) tree.push(n);}
+
+  const chainW=ci=>{
+    const n=chains[ci].members.length;
+    return n*BOX_W+(n-1)*PAIR_GAP;
+  };
+  function measure(n){
+    n.own=chainW(n.ci);
+    let total=0;
+    for(const g of n.groups){
+      let w=0;
+      for(const k of g.kids) w+=measure(k.node)+SIB_GAP;
+      g.width=Math.max(0,w-SIB_GAP);
+      if(g.width>0) total+=g.width+GROUP_GAP;
+    }
+    n.kidsW=Math.max(0,total-GROUP_GAP);
+    return n.width=Math.max(n.own,n.kidsW);
+  }
+  function place(n,x){
+    n.x=x;
+    let cx=x+(n.width-n.own)/2;
+    for(const m of chains[n.ci].members){
+      const p=P.get(m);
+      p.x=cx; p.y=(p.gen-1)*GEN_H+PAD;
+      cx+=BOX_W+PAIR_GAP;
+    }
+    let kx=x+(n.width-n.kidsW)/2;
+    for(const g of n.groups){
+      if(!g.width) continue;
+      let gx=kx;
+      for(const k of g.kids){ place(k.node,gx); gx+=k.node.width+SIB_GAP; }
+      kx+=g.width+GROUP_GAP;
+    }
+  }
+  let cursor=GUTTER;
+  for(const n of tree){ measure(n); place(n,cursor); cursor+=n.width+GROUP_GAP*1.5; }
+  return cursor+PAD;
+}
+
+/* ---- kinship ----
+   Everything here answers one question: given A, what is B to them? The
+   answer is always phrased from A's side ("B is A's second cousin"). */
+const ORD=["first","second","third","fourth","fifth","sixth","seventh",
+           "eighth","ninth","tenth"];
+const TIMES=["","once","twice","three times","four times","five times"];
+const bySex=(p,m,f,n)=>p.sex==="M"?m:p.sex==="F"?f:n;
+const greats=n=>"great-".repeat(Math.max(0,n));
+
+/* every ancestor with their distance, the person themselves at 0 */
+function ancestry(id){
+  const out=new Map([[id,0]]), q=[id];
+  while(q.length){
+    const cur=q.shift(), d=out.get(cur);
+    const u=U.get(P.get(cur).parentUnion); if(!u) continue;
+    for(const side of [u.a,u.b])
+      if(side&&P.has(side)&&!out.has(side)){ out.set(side,d+1); q.push(side); }
+  }
+  return out;
+}
+const ancestorTerm=(d,p)=>d===1?bySex(p,"father","mother","parent")
+  :greats(d-2)+bySex(p,"grandfather","grandmother","grandparent");
+const descendantTerm=(d,p)=>d===1?bySex(p,"son","daughter","child")
+  :greats(d-2)+bySex(p,"grandson","granddaughter","grandchild");
+
+function relation(aId,bId){
+  const a=P.get(aId), b=P.get(bId);
+  if(!a||!b||aId===bId) return "";
+  /* a partner is not a blood relation but it is the answer people expect */
+  if(a.unions.some(u=>b.unions.includes(u))) return "partner";
+
+  /* nearest ancestor the two of them share, preferring the closest and then
+     the least lopsided one */
+  const A=ancestry(aId), B=ancestry(bId);
+  let best=null;
+  for(const [c,da] of A){
+    const db=B.get(c); if(db==null) continue;
+    const better=!best||da+db<best.da+best.db
+      ||(da+db===best.da+best.db&&Math.abs(da-db)<Math.abs(best.da-best.db));
+    if(better) best={da,db};
+  }
+  if(!best) return "";
+  const {da,db}=best;
+  if(da===0) return descendantTerm(db,b);        // a is the shared ancestor
+  if(db===0) return ancestorTerm(da,b);          // b is the shared ancestor
+  if(da===1&&db===1)
+    return (a.parentUnion&&a.parentUnion===b.parentUnion?"":"half-")
+      +bySex(b,"brother","sister","sibling");
+  if(db===1) return greats(da-2)+bySex(b,"uncle","aunt","aunt or uncle");
+  if(da===1) return greats(db-2)+bySex(b,"nephew","niece","nephew or niece");
+  const deg=Math.min(da,db)-1, rem=Math.abs(da-db);
+  return `${ORD[deg-1]||deg+"th"} cousin`
+    +(rem?` ${TIMES[rem]||rem+" times"} removed`:"");
+}
+
+/* Married-ins have no blood path to most of the tree, so fall back to one
+   step through a marriage rather than reporting nothing. */
+function kinship(aId,bId){
+  if(aId===bId) return "the same person";
+  const direct=relation(aId,bId); if(direct) return direct;
+  const partners=id=>P.get(id).unions
+    .map(uid=>{const u=U.get(uid); return u.a===id?u.b:u.a;})
+    .filter(q=>q&&P.has(q));
+  for(const q of partners(bId)){
+    const r=relation(aId,q); if(r) return `${r}'s partner`;
+  }
+  for(const q of partners(aId)){
+    const r=relation(q,bId); if(r) return `partner's ${r}`;
+  }
+  return "";
+}
+
+/* ---- render ---- */
+const svg=document.getElementById("stage");
+const NS="http://www.w3.org/2000/svg";
+const el=(t,a={})=>{const e=document.createElementNS(NS,t);for(const k in a)e.setAttribute(k,a[k]);return e;};
+let root, view={x:0,y:0,k:1}, totalW=0, totalH=0;
+
+/* Where each union's connectors ended up, so a selection can retrace the run
+   from a child up to its parents without the layout being computed twice.
+   Rebuilt by every render, because switching detail level throws the old
+   coordinates away along with the elements. */
+const linkGeom=new Map();
+let litLayer=null;
+
+const sexClass = s => s==="M" ? "m" : s==="F" ? "f" : "u";
+
+/* Horizontal run from x0 to x1, arcing over every vertical it crosses. A
+   real junction in this chart is always a T, so an unmarked crossing is
+   already distinguishable — the hop is what makes it unambiguous. */
+function hops(x0,x1,y,verticals){
+  const right=x1>x0, lo=Math.min(x0,x1), hi=Math.max(x0,x1);
+  const at=verticals
+    .filter(v=>v.x>lo+HOP&&v.x<hi-HOP
+              &&Math.min(v.y1,v.y2)<y&&Math.max(v.y1,v.y2)>y)
+    .map(v=>v.x)
+    .sort((a,b)=>right?a-b:b-a);
+  let d="";
+  for(const x of at)
+    d+=`L${right?x-HOP:x+HOP} ${y}`
+      +`A${HOP} ${HOP} 0 0 ${right?1:0} ${right?x+HOP:x-HOP} ${y}`;
+  return d+`L${x1} ${y}`;
+}
+
+function render(){
+  setMode(mode);                    /* photos may have appeared since load */
+  totalW=layout();
+  const maxGen=Math.max(...[...P.values()].map(p=>p.gen));
+  totalH=(maxGen-1)*GEN_H+PAD*2+BOX_H;
+  svg.textContent="";
+  /* one clip path in object-bounding-box units crops every avatar to a circle,
+     whatever its size or position */
+  const defs=el("defs");
+  const clip=el("clipPath",{id:"avatarClip",clipPathUnits:"objectBoundingBox"});
+  clip.appendChild(el("circle",{cx:".5",cy:".5",r:".5"}));
+  defs.appendChild(clip); svg.appendChild(defs);
+  root=el("g"); svg.appendChild(root);
+
+  const bands=el("g"); root.appendChild(bands);
+  for(let g=2;g<=maxGen;g+=2)
+    bands.appendChild(el("rect",{
+      x:0,y:(g-1)*GEN_H+PAD-24,width:totalW,height:BOX_H+48,class:"gen-band"}));
+
+  const lines=el("g"); root.appendChild(lines);
+  /* between the rules and the boxes: bold lineage passes behind a box, never
+     over its text */
+  litLayer=el("g"); root.appendChild(litLayer);
+  const nodes=el("g"); root.appendChild(nodes);
+  linkGeom.clear();
+  /* every vertical drawn so far, so cross-links can hop the ones they cross */
+  const verticals=[];
+
+  for(const u of U.values()){
+    const a=P.get(u.a), b=P.get(u.b);
+    const kids=(kidsOf.get(u.id)||[]).map(k=>P.get(k)).filter(k=>k&&k.x!=null);
+    let barY, midX, drop=DROP;
+    const geom={bar:null,barY:null,midX:null,busY:null,kids:new Map(),cross:new Map()};
+    linkGeom.set(u.id,geom);
+
+    if(a&&b&&a.x!=null&&b.x!=null){
+      barY=a.y+BOX_H/2;
+      const left=Math.min(a.x,b.x), right=Math.max(a.x,b.x);
+      lines.appendChild(el("line",{x1:left+BOX_W,y1:barY,x2:right,y2:barY,class:"link"}));
+      midX=(left+BOX_W+right)/2;
+      geom.bar={x1:left+BOX_W,x2:right};
+    } else {
+      const solo=a&&a.x!=null?a:(b&&b.x!=null?b:null);
+      if(!solo) continue;
+      barY=solo.y+BOX_H; midX=solo.x+BOX_W/2; drop=SOLO_DROP;
+    }
+    geom.barY=barY; geom.midX=midX;
+
+    const remote=new Set(crossLinks.filter(c=>c.uid===u.id).map(c=>c.kid));
+    const local=kids.filter(k=>!remote.has(k.id));
+    if(!local.length) continue;
+
+    const busY=barY+drop;
+    geom.busY=busY;
+    lines.appendChild(el("line",{x1:midX,y1:barY,x2:midX,y2:busY,class:"link"}));
+    verticals.push({x:midX,y1:barY,y2:busY});
+    const centres=local.map(k=>k.x+BOX_W/2);
+    lines.appendChild(el("line",{
+      x1:Math.min(...centres,midX),y1:busY,x2:Math.max(...centres,midX),y2:busY,class:"link"}));
+    for(const k of local){
+      lines.appendChild(el("line",{x1:k.x+BOX_W/2,y1:busY,x2:k.x+BOX_W/2,y2:k.y,class:"link"}));
+      verticals.push({x:k.x+BOX_W/2,y1:busY,y2:k.y});
+      geom.kids.set(k.id,{x:k.x+BOX_W/2,y:k.y});
+    }
+  }
+
+  const laneUsed=new Map();          /* one lane per cross-link, per row */
+  for(const {uid,kid} of crossLinks){
+    const u=U.get(uid), k=P.get(kid);
+    if(!k||k.x==null) continue;
+    const a=P.get(u.a), b=P.get(u.b);
+    const anchor=a&&a.x!=null?a:b;
+    if(!anchor||anchor.x==null) continue;
+    const barY=anchor.y+BOX_H/2;
+    const midX=(a&&b&&a.x!=null&&b.x!=null)
+      ? (Math.min(a.x,b.x)+BOX_W+Math.max(a.x,b.x))/2 : anchor.x+BOX_W/2;
+    const n=laneUsed.get(anchor.y)||0; laneUsed.set(anchor.y,n+1);
+    const lane=anchor.y+BOX_H+CROSS_LANE+n*CROSS_STEP;
+    const cx=k.x+BOX_W/2;
+    const path=el("path",{
+      d:`M${midX} ${barY}V${lane}`+hops(midX,cx,lane,verticals)+`V${k.y}`,
+      class:"link cross"});
+    lines.appendChild(path);
+    const geom=linkGeom.get(uid); if(geom) geom.cross.set(kid,path);
+    /* later cross-links hop this one too */
+    verticals.push({x:midX,y1:barY,y2:lane},{x:cx,y1:lane,y2:k.y});
+  }
+
+  for(const p of P.values()){
+    if(p.x==null) continue;
+    const g=el("g",{class:"person",tabindex:"0",role:"button","data-id":p.id});
+    g.setAttribute("aria-label",label(p));
+    g.appendChild(el("rect",{x:p.x,y:p.y,width:BOX_W,height:BOX_H,rx:2,
+      class:"box "+sexClass(p.sex)}));
+
+    /* the photo band pushes everything else down; without photos it is 0 */
+    const band=PHOTO_BAND;
+    if(band){
+      const cx=p.x+BOX_W/2, cy=p.y+PHOTO_TOP+PHOTO_R;
+      if(p.photo){
+        const im=el("image",{x:cx-PHOTO_R,y:cy-PHOTO_R,
+          width:PHOTO_R*2,height:PHOTO_R*2,
+          preserveAspectRatio:"xMidYMid slice","clip-path":"url(#avatarClip)"});
+        im.setAttribute("href",photoURL(p.photo));
+        g.appendChild(im);
+      }else{
+        /* initials keep the row visually even for people with no photo yet */
+        g.appendChild(el("circle",{cx,cy,r:PHOTO_R,class:"avatar-blank"}));
+        /* baseline offset follows the type size, which follows the circle */
+        const ini=el("text",{x:cx,y:cy+(mode==="compact"?4:7),
+          "text-anchor":"middle",class:"initials"});
+        ini.textContent=initials(p.name);
+        g.appendChild(ini);
+      }
+      g.appendChild(el("circle",{cx,cy,r:PHOTO_R,class:"avatar-ring"}));
+    }
+
+    const nm=el("text",{x:p.x+BOX_W/2,y:p.y+band+20,"text-anchor":"middle",class:"nm"});
+    nm.textContent=p.name;
+    g.appendChild(nm);
+
+    const yr=el("text",{x:p.x+BOX_W/2,y:p.y+band+34,"text-anchor":"middle",class:"yr"});
+    yr.textContent=p.birth?(p.death?`${p.birth}–${p.death}`:`b. ${p.birth}`):"";
+    g.appendChild(yr);
+
+    const lines2=wrap(p.description,DESC_CHARS,DESC_LINES);
+    if(lines2.length){
+      g.appendChild(el("line",{x1:p.x+14,y1:p.y+band+42,x2:p.x+BOX_W-14,y2:p.y+band+42,class:"divider"}));
+      lines2.forEach((ln,i)=>{
+        const t=el("text",{x:p.x+BOX_W/2,y:p.y+band+56+i*12,"text-anchor":"middle",class:"desc"});
+        t.textContent=ln;
+        g.appendChild(t);
+      });
+    }
+
+    g.appendChild(el("rect",{x:p.x,y:p.y,width:BOX_W,height:BOX_H,class:"hit"}));
+    g.addEventListener("click",()=>{ if(moved<5) pickPerson(p.id); });
+    g.addEventListener("keydown",e=>{
+      if(e.key==="Enter"||e.key===" "){e.preventDefault();pickPerson(p.id);}
+    });
+    nodes.appendChild(g);
+  }
+
+  svg.classList.toggle("compact",mode==="compact");
+  showIssues();
+  repaint();
+}
+
+/* ---- pan / zoom ----
+   No setPointerCapture: capturing on the svg swallows the click before it
+   reaches a person group, which is what made selection unreliable. */
+function apply(){ root.setAttribute("transform",`translate(${view.x} ${view.y}) scale(${view.k})`); }
+
+/* Level of detail follows the zoom. Re-rendering is cheap at this size, and
+   only heights change, so the tree is pinned by whatever sits in the middle
+   of the viewport rather than jumping to a new place. */
+function wantMode(k){ return k<ZOOM_OUT?"compact":k>ZOOM_IN?"full":mode; }
+function maybeSwitch(){
+  const want=wantMode(view.k);
+  if(want===mode) return;
+  const r=svg.getBoundingClientRect(), oldH=totalH;
+  const cy=(r.height/2-view.y)/view.k;
+  setMode(want); render();
+  view.y=r.height/2-cy*(oldH?totalH/oldH:1)*view.k;
+}
+/* On a phone the whole chart at once is a grey smear about five pixels tall,
+   and a "fit" that fits everything and shows nothing is worse than one that
+   stops at the smallest size still worth looking at and lets you pan. */
+const NARROW = () => window.innerWidth<=860;   /* keep in step with the media query */
+function fit(){
+  for(let i=0;i<2;i++){
+    const r=svg.getBoundingClientRect();
+    const k=Math.max(NARROW()?.3:0,
+      Math.min(r.width/(totalW+40), r.height/(totalH+40), 1));
+    const want=wantMode(k);
+    if(want!==mode){ setMode(want); render(); continue; }
+    view.k=k;
+    view.x=(r.width-totalW*k)/2;
+    view.y=(r.height-totalH*k)/2;
+    break;
+  }
+  apply();
+}
+/* Where a phone opens: readable rather than complete, over the middle of the
+   oldest generation, with the rest a pan away. A permalink overrides this,
+   because openHash() runs after it. */
+function startView(){
+  if(!NARROW()) return;
+  /* the middle of the top row is usually empty air between two couples, so
+     open on the eldest, leftmost person instead — where you would start
+     reading */
+  const first=[...P.values()].filter(q=>q.x!=null)
+    .sort((a,b)=>a.gen-b.gen||a.x-b.x)[0];
+  if(!first) return;
+  const r=svg.getBoundingClientRect();
+  view.k=.8; maybeSwitch();
+  view.x=r.width/2-(first.x+BOX_W/2)*view.k;
+  view.y=20-(first.y-20)*view.k;
+  apply();
+}
+
+/* The sheet covers the bottom of the chart on a phone, so a person selected
+   from a panel link — or tapped near the fold — can end up behind it. Move
+   only when they are actually out of the clear: a chart that jumps on every
+   tap is worse than one that occasionally has to. */
+function keepVisible(id){
+  if(!NARROW()) return;
+  const p=P.get(id); if(!p||p.x==null) return;
+  const r=svg.getBoundingClientRect();
+  const floor=r.height-(panel.classList.contains("open")?panel.offsetHeight:0)-8;
+  const x0=view.x+p.x*view.k, x1=x0+BOX_W*view.k;
+  const y0=view.y+p.y*view.k, y1=y0+BOX_H*view.k;
+  if(x0<8||x1>r.width-8) view.x=r.width/2-(p.x+BOX_W/2)*view.k;
+  if(y0<8||y1>floor)     view.y=floor/2-(p.y+BOX_H/2)*view.k;
+  apply();
+}
+
+/* Centre one person at a readable zoom — how a permalink arrives. */
+function focusOn(id){
+  const p=P.get(id); if(!p||p.x==null) return;
+  const r=svg.getBoundingClientRect();
+  /* centre in what the sheet leaves of the chart, not in the whole viewport */
+  const h=r.height-(NARROW()&&panel.classList.contains("open")?panel.offsetHeight:0);
+  view.k=1; maybeSwitch();
+  view.x=r.width/2-(p.x+BOX_W/2)*view.k;
+  view.y=h/2-(p.y+BOX_H/2)*view.k;
+  apply();
+}
+/* Every finger currently down on the chart. `touch-action:none` means the
+   browser hands us the gesture instead of scrolling the page with it, so pinch
+   has to be implemented here or a phone has no way to zoom at all. */
+const K_MIN=.12, K_MAX=2.5, pointers=new Map();
+let drag=null, pinch=null, moved=0;
+
+/* Zoom so the point under (mx,my) stays under it. */
+function zoomAbout(k,mx,my){
+  k=Math.min(K_MAX,Math.max(K_MIN,k));
+  view.x=mx-(mx-view.x)*(k/view.k);
+  view.y=my-(my-view.y)*(k/view.k);
+  view.k=k; maybeSwitch(); apply();
+}
+function span(){
+  const [a,b]=[...pointers.values()];
+  return {d:Math.max(1,Math.hypot(a.x-b.x,a.y-b.y)),cx:(a.x+b.x)/2,cy:(a.y+b.y)/2};
+}
+svg.addEventListener("pointerdown",e=>{
+  pointers.set(e.pointerId,{x:e.clientX,y:e.clientY});
+  if(pointers.size===2){
+    const r=svg.getBoundingClientRect(), t=span();
+    /* the second finger turns a drag into a pinch, and spends `moved` so the
+       lift at the end can't be read as a tap on whoever is underneath */
+    drag=null; moved=99; svg.classList.remove("drag");
+    pinch={d:t.d,k0:view.k,
+      wx:(t.cx-r.left-view.x)/view.k, wy:(t.cy-r.top-view.y)/view.k};
+    return;
+  }
+  if(pointers.size>1) return;
+  drag={dx:e.clientX-view.x, dy:e.clientY-view.y, sx:e.clientX, sy:e.clientY};
+  moved=0; svg.classList.add("drag");
+});
+window.addEventListener("pointermove",e=>{
+  if(pointers.has(e.pointerId)) pointers.set(e.pointerId,{x:e.clientX,y:e.clientY});
+  if(pinch&&pointers.size>=2){
+    const r=svg.getBoundingClientRect(), t=span();
+    const mx=t.cx-r.left, my=t.cy-r.top;
+    /* the world point that was under the midpoint stays under it, so the same
+       two fingers pan and scale at once */
+    view.k=Math.min(K_MAX,Math.max(K_MIN,pinch.k0*t.d/pinch.d));
+    view.x=mx-pinch.wx*view.k; view.y=my-pinch.wy*view.k;
+    const was=mode; maybeSwitch();
+    /* a detail switch changes every height, so re-anchor rather than fight it */
+    if(mode!==was) pinch.wy=(my-view.y)/view.k;
+    apply();
+    return;
+  }
+  if(!drag) return;
+  moved=Math.max(moved,Math.hypot(e.clientX-drag.sx,e.clientY-drag.sy));
+  view.x=e.clientX-drag.dx; view.y=e.clientY-drag.dy; apply();
+});
+function lift(e){
+  pointers.delete(e.pointerId);
+  if(pointers.size<2) pinch=null;
+  if(!pointers.size){ drag=null; svg.classList.remove("drag"); return; }
+  /* one finger left over from a pinch: carry on panning from where it is */
+  const [p]=[...pointers.values()];
+  drag={dx:p.x-view.x, dy:p.y-view.y, sx:p.x, sy:p.y}; moved=99;
+}
+window.addEventListener("pointerup",lift);
+window.addEventListener("pointercancel",lift);
+svg.addEventListener("wheel",e=>{
+  e.preventDefault();
+  const r=svg.getBoundingClientRect();
+  zoomAbout(view.k*(e.deltaY<0?1.12:1/1.12),e.clientX-r.left,e.clientY-r.top);
+},{passive:false});
+document.getElementById("fit").addEventListener("click",()=>{fit();});
+/* A phone fires resize every time the address bar slides away. Refitting there
+   would throw away wherever the reader had panned to, so only a real change of
+   width — a rotation, a resized window — starts over. */
+let lastW=window.innerWidth;
+window.addEventListener("resize",()=>{
+  if(window.innerWidth===lastW){ apply(); return; }
+  lastW=window.innerWidth; fit(); startView();
+});
+
+/* ---- selection + detail panel ---- */
+const panel=document.getElementById("panel");
+let selectedId=null, compareId=null, picking=false;
+
+/* What a selection draws in bold: every ancestor, plus the siblings standing
+   on either side of the person, and the parent-to-child edges that reach them.
+   Not `ancestry` — that name is taken by the kinship walker above, and a second
+   top-level function of the same name silently replaces it, which breaks
+   "How are we related?" and nothing else.
+   Both parents of every union are ancestors, so a step up is a step up two
+   branches; `edges` is what the bold line has to trace, one entry per
+   child-in-the-line. A half-sibling's edge carries `bar:false` — the run to
+   the shared parent belongs in the picture, the parent's other marriage does
+   not. */
+function kinRun(id){
+  const boxes=new Set(), edges=[], seen=new Set();
+  (function up(pid){
+    if(seen.has(pid)) return;         /* a cousin marriage can rejoin a branch */
+    seen.add(pid);
+    const q=P.get(pid); if(!q||!q.parentUnion) return;
+    const u=U.get(q.parentUnion); if(!u) return;
+    edges.push({uid:u.id,kid:pid});
+    for(const s of [u.a,u.b]) if(s&&P.has(s)){ boxes.add(s); up(s); }
+  })(id);
+
+  const pu=U.get((P.get(id)||{}).parentUnion);
+  if(pu){
+    for(const sib of kidsOf.get(pu.id)||[])
+      if(sib!==id&&P.has(sib)){ boxes.add(sib); edges.push({uid:pu.id,kid:sib}); }
+    for(const parent of [pu.a,pu.b]){
+      const par=P.get(parent); if(!par) continue;
+      for(const uid of par.unions){
+        if(uid===pu.id) continue;
+        for(const k of kidsOf.get(uid)||[])
+          if(P.has(k)){ boxes.add(k); edges.push({uid,kid:k,bar:false}); }
+      }
+    }
+  }
+  return {boxes,edges};
+}
+
+/* Retrace the selection's line of descent in bold. The run for one child is
+   its own stub, the stretch of sibling bus back to the drop, and the drop to
+   the marriage bar — the whole bus is never lit, because that would claim the
+   siblings hanging off the rest of it. */
+function paintLineage(){
+  if(!litLayer) return;
+  litLayer.textContent="";
+  for(const n of svg.querySelectorAll(".link.lit")) n.classList.remove("lit");
+  if(!selectedId) return;
+  const {edges}=kinRun(selectedId);
+  const barsDone=new Set();
+  for(const {uid,kid,bar} of edges){
+    const g=linkGeom.get(uid); if(!g) continue;
+    const cross=g.cross.get(kid);
+    if(cross) cross.classList.add("lit");     /* one path, one child: light it in place */
+    else{
+      const k=g.kids.get(kid);
+      if(k&&g.busY!=null)
+        litLayer.appendChild(el("path",{class:"lit-link",
+          d:`M${k.x} ${k.y}V${g.busY}H${g.midX}V${g.barY}`}));
+    }
+    if(g.bar&&bar!==false&&!barsDone.has(uid)){
+      barsDone.add(uid);
+      litLayer.appendChild(el("path",{class:"lit-link",
+        d:`M${g.bar.x1} ${g.barY}H${g.bar.x2}`}));
+    }
+  }
+}
+
+/* Everyone a selection keeps at full strength: the line up, the line down,
+   and the row you stand in — siblings, full and half. Siblings hang off a
+   parent union that the up-walk passes straight through, so without this they
+   were the one close relative the panel named and the chart greyed out. Their
+   partners and children are left dim on purpose: a sibling is a relative, a
+   sibling's in-laws are where the highlight would stop meaning anything. */
+function lineage(id){
+  const keep=new Set([id]);
+  const pu=U.get((P.get(id)||{}).parentUnion);
+  if(pu){
+    for(const s of kidsOf.get(pu.id)||[]) keep.add(s);
+    for(const parent of [pu.a,pu.b]){
+      const par=P.get(parent); if(!par) continue;
+      for(const uid of par.unions)
+        for(const k of kidsOf.get(uid)||[]) keep.add(k);   /* half-siblings */
+    }
+  }
+  (function up(pid){
+    const q=P.get(pid); if(!q||!q.parentUnion) return;
+    const u=U.get(q.parentUnion); if(!u) return;
+    for(const s of [u.a,u.b]) if(s&&!keep.has(s)){keep.add(s);up(s);}
+  })(id);
+  (function down(pid){
+    const q=P.get(pid); if(!q) return;
+    for(const uid of q.unions){
+      const u=U.get(uid);
+      const other=u.a===pid?u.b:u.a;
+      if(other) keep.add(other);
+      for(const kid of kidsOf.get(uid)||[]) if(!keep.has(kid)){keep.add(kid);down(kid);}
+    }
+  })(id);
+  return keep;
+}
+
+/* Switching detail level throws the person groups away and builds new ones,
+   so all of the state that lives in a class has to be put back afterwards.
+   render() ends by calling this. */
+function repaint(){
+  const keep=selectedId?lineage(selectedId):null;
+  const kin=selectedId?kinRun(selectedId).boxes:null;
+  const q=document.getElementById("find").value.trim().toLowerCase();
+  document.querySelectorAll(".person").forEach(n=>{
+    const id=n.dataset.id, p=P.get(id);
+    n.classList.toggle("sel",id===selectedId);
+    n.classList.toggle("kin",!!kin&&kin.has(id));
+    n.classList.toggle("cmp",id===compareId);
+    n.classList.toggle("dim",!!keep&&!keep.has(id)&&id!==compareId);
+    n.classList.toggle("hit-match",!!q&&label(p).toLowerCase().includes(q));
+  });
+  svg.classList.toggle("picking",picking);
+  paintLineage();
+}
+
+function select(id){
+  const p=P.get(id); if(!p) return;
+  /* Selecting the person who is already selected is a toggle: it closes the
+     panel and restores the tree, same as clicking off. */
+  if(selectedId===id&&panel.classList.contains("open")){ clearSelection(); return; }
+  selectedId=id; compareId=null; setPicking(false);
+  repaint();
+  setHash(id);
+  showRelation();
+
+  const img=document.getElementById("pPhoto");
+  img.hidden=!p.photo;
+  if(p.photo){
+    img.src=photoURL(p.photo);
+    img.alt=label(p);
+    img.onerror=()=>{img.hidden=true;};
+  }
+  document.getElementById("pName").textContent=label(p);
+  document.getElementById("pSub").textContent=
+    p.birth?(p.death?`${p.birth}–${p.death}`:`born ${p.birth}`):"dates unknown";
+  document.getElementById("pDesc").textContent=p.description||"No note recorded yet.";
+
+  const dl=document.getElementById("pRel"); dl.textContent="";
+  const add=(term,items)=>{
+    if(!items.length) return;
+    const dt=document.createElement("dt"); dt.textContent=term; dl.appendChild(dt);
+    const dd=document.createElement("dd");
+    items.forEach((it,i)=>{
+      if(i) dd.append(", ");
+      if(it.id){
+        const a=document.createElement("a");
+        a.textContent=it.text; a.tabIndex=0; a.setAttribute("role","button");
+        a.addEventListener("click",()=>select(it.id));
+        a.addEventListener("keydown",e=>{
+          if(e.key==="Enter"||e.key===" "){e.preventDefault();select(it.id);}
+        });
+        dd.appendChild(a);
+      } else dd.append(it.text);
+    });
+    dl.appendChild(dd);
+  };
+
+  const pu=U.get(p.parentUnion);
+  add("Parents",pu?[pu.a,pu.b].filter(x=>x&&P.has(x))
+    .map(x=>({id:x,text:label(P.get(x))})):[]);
+
+  for(const uid of p.unions){
+    const u=U.get(uid);
+    const otherId=u.a===p.id?u.b:u.a;
+    if(otherId&&P.has(otherId))
+      add("Partner",[{id:otherId,text:label(P.get(otherId))}]);
+  }
+
+  add("Children",p.unions.flatMap(uid=>kidsOf.get(uid)||[])
+    .map(k=>({id:k,text:label(P.get(k))})));
+
+  add("Siblings",(pu?(kidsOf.get(pu.id)||[]).filter(s=>s!==id):[])
+    .map(s=>({id:s,text:label(P.get(s))})));
+
+  const half=[];
+  if(pu) for(const parent of [pu.a,pu.b]){
+    const par=P.get(parent); if(!par) continue;
+    for(const uid of par.unions){
+      if(uid===pu.id) continue;
+      for(const k of kidsOf.get(uid)||[]) if(k!==id) half.push(k);
+    }
+  }
+  add("Half-siblings",[...new Set(half)].map(h=>({id:h,text:label(P.get(h))})));
+
+  panel.classList.add("open");
+  keepVisible(id);
+}
+function clearSelection(){
+  /* Nothing on the chart should still read as current once the panel is gone,
+     focus included. */
+  const f=document.activeElement;
+  if(f&&f.closest&&f.closest(".person")&&f.blur) f.blur();
+  selectedId=null; compareId=null; setPicking(false);
+  panel.classList.remove("open");
+  repaint();
+  showRelation();      /* the panel is aria-live, so don't leave a stale answer in it */
+  setHash(null);
+}
+
+/* ---- permalinks ----
+   The hash is the person's name, so a link is readable and survives the
+   sheet being re-ordered; only renaming someone breaks it. */
+const slug = s => key(s).replace(/[^a-z0-9]+/g,"-").replace(/^-|-$/g,"");
+function setHash(id){
+  const url=location.pathname+location.search+(id?"#"+slug(P.get(id).name):"");
+  /* replaceState keeps the back button meaning "the page before this one",
+     but it throws on some file:// origins, hence the fallback. */
+  try{ history.replaceState(null,"",url); }
+  catch(_){ if(id) location.hash=slug(P.get(id).name); }
+}
+function fromHash(){
+  const want=decodeURIComponent(location.hash.replace(/^#/,"")).toLowerCase();
+  if(!want) return null;
+  for(const p of P.values()) if(slug(p.name)===want) return p.id;
+  return null;
+}
+function openHash(){
+  const id=fromHash();
+  if(!id||id===selectedId) return;
+  select(id); focusOn(id);
+}
+window.addEventListener("hashchange",openHash);
+
+document.getElementById("copyLink").addEventListener("click",async e=>{
+  const b=e.currentTarget, was=b.textContent;
+  try{ await navigator.clipboard.writeText(location.href); }
+  catch(_){
+    const t=document.createElement("input");
+    t.value=location.href; document.body.appendChild(t); t.select();
+    try{ document.execCommand("copy"); }catch(__){}
+    t.remove();
+  }
+  b.textContent="Copied"; setTimeout(()=>{b.textContent=was;},1200);
+});
+
+/* ---- how are we related? ----
+   The button is a toggle, not a one-shot. While it is on, every click on the
+   chart re-answers from the selected person's side, so you can walk along a
+   row of cousins without reaching back for the button. It goes off when it is
+   pressed again, on Escape, on a click into empty space, and whenever the
+   panel closes — which is why select() and clearSelection() both route
+   through setPicking(). */
+const relOut=document.getElementById("relOut");
+const relateBtn=document.getElementById("relateBtn");
+
+/* Single owner of `picking` and the button's pressed chrome, so the two can
+   never disagree. Picking without an anchor person is meaningless, so asking
+   for it with nothing selected turns it off instead. */
+function setPicking(on){
+  picking=!!on&&!!selectedId;
+  relateBtn.setAttribute("aria-pressed",picking?"true":"false");
+}
+
+function showRelation(){
+  relOut.textContent="";
+  const hint=t=>{
+    const s=document.createElement("span"); s.className="again"; s.textContent=t;
+    relOut.appendChild(s);
+  };
+  /* An answer and the invitation to pick again live together: the toggle is
+     still on, so the hint has to survive the answer rather than be replaced
+     by it. */
+  if(selectedId&&compareId){
+    const a=P.get(selectedId), b=P.get(compareId);
+    const term=kinship(selectedId,compareId);
+    if(!term) relOut.append(`No relation recorded between ${label(a)} and ${label(b)}.`);
+    else if(term==="the same person") relOut.append("That is the same person.");
+    else{
+      const em=document.createElement("em"); em.textContent=term;
+      relOut.append(`${label(b)} is ${label(a)}'s `,em,".");
+    }
+    if(picking) hint("Click anyone else to compare again, or press Escape.");
+    relOut.hidden=false; return;
+  }
+  if(picking){
+    relOut.append(`Click anyone on the chart to see how they relate to ${label(P.get(selectedId))}.`);
+    relOut.hidden=false; return;
+  }
+  relOut.hidden=true;
+}
+
+relateBtn.addEventListener("click",()=>{
+  if(!selectedId) return;
+  setPicking(!picking);
+  compareId=null;
+  repaint(); showRelation();
+});
+document.addEventListener("keydown",e=>{
+  if(e.key==="Escape"&&picking){ setPicking(false); repaint(); showRelation(); }
+});
+
+/* A click on a person means "compare" while picking, "select" otherwise.
+   Picking no longer ends with the pick — the toggle is what ends it.
+
+   Clicking the same person twice always means undo, in either mode: on the
+   selected person it dismisses the panel and clears the selection (select()
+   does that), and on the person being compared it drops the answer and waits
+   for the next pick. */
+function pickPerson(id){
+  if(picking&&selectedId&&id!==selectedId){
+    compareId = id===compareId ? null : id;
+    repaint(); showRelation(); return;
+  }
+  select(id);
+}
+document.getElementById("closePanel").addEventListener("click",clearSelection);
+
+/* Clicking anywhere that is not a person restores the tree to full strength.
+   Panel and header are exempt: the panel's relation links re-select, and the
+   search box would otherwise clear the selection on every stray click.
+
+   Walk composedPath() rather than target.closest(): selecting from a panel
+   link rebuilds the relations list, so by the time this bubbles the clicked
+   <a> is detached and closest() would report it as outside the panel. The
+   event path is fixed when dispatch starts, so it still shows the ancestors. */
+const KEEP_SELECTION=".person, #panel, header, #issues";
+document.addEventListener("click",e=>{
+  if(moved>=5) return;                        // that was a pan, not a click
+  for(const t of (e.composedPath?e.composedPath():[e.target]))
+    if(t instanceof Element && t.matches(KEEP_SELECTION)) return;
+  /* One click into empty space, one meaning: the panel goes away and the tree
+     comes back to full strength. clearSelection() disarms the picker too, so
+     there is no armed-but-invisible state left behind. Escape is the way out
+     of picking that keeps the selection. */
+  clearSelection();
+});
+
+/* ---- search ---- */
+document.getElementById("find").addEventListener("input",repaint);
+
+/* ---- validation surface ---- */
+function showIssues(){
+  const box=document.getElementById("issues"), list=document.getElementById("issueList");
+  const warn=document.getElementById("warn");
+  list.textContent="";
+  if(!issues.length){ box.hidden=true; warn.hidden=true; return; }
+  warn.hidden=false;
+  warn.textContent=`${issues.length} problem${issues.length>1?"s":""} in the sheet`;
+  for(const m of issues.slice(0,12)){
+    const li=document.createElement("li"); li.textContent=m; list.appendChild(li);
+  }
+  box.hidden=false;
+  warn.onclick=()=>{box.hidden=!box.hidden;};
+}
+
+/* ---- load ---- */
+function toRows(res){
+  if(!res||!res.table) throw new Error("no table in response");
+  const cols=res.table.cols.map(c=>(c.label||c.id||"").trim().toLowerCase());
+  return res.table.rows.map(r=>Object.fromEntries(cols.map((c,i)=>{
+    const cell=r.c&&r.c[i];
+    const v=cell&&cell.v!=null?cell.v:"";
+    return [c,String(v).trim()];
+  }))).filter(o=>Object.values(o).some(v=>v!==""));
+}
+function loadTab(id,tab){
+  return new Promise((resolve,reject)=>{
+    const cb="__gviz"+Math.random().toString(36).slice(2,10);
+    const s=document.createElement("script");
+    const timer=setTimeout(()=>{done();reject(new Error("timed out"));},15000);
+    function done(){clearTimeout(timer);delete window[cb];s.remove();}
+    window[cb]=res=>{
+      done();
+      if(res&&res.status==="error"){
+        const e=res.errors&&res.errors[0];
+        reject(new Error(((e&&(e.detailed_message||e.message))||"unknown error").replace(/<[^>]*>/g,"")));
+        return;
+      }
+      try{resolve(toRows(res));}catch(err){reject(err);}
+    };
+    s.onerror=()=>{done();reject(new Error("could not load the sheet"));};
+    s.src=gviz(id,tab,cb);
+    document.head.appendChild(s);
+  });
+}
+async function load(){
+  const id=SHEET_ID||DEMO_SHEET;
+  try{
+    /* named tab first, then whichever tab the sheet opens on */
+    let rows;
+    try{ rows=await loadTab(id,PEOPLE_TAB); }
+    catch(e){ rows=await loadTab(id,""); }
+    buildModel(rows); render(); fit(); startView(); openHash();
+    document.getElementById("demoNote").hidden=!isDemo;
+  }catch(err){
+    /* There is no built-in family to fall back on, which is the point: a
+       stale tree pretending to be the current one is worse than an error. */
+    setup(`Could not read that sheet (${err.message}). `+
+          `Check that it is shared with anyone who has the link.`);
+  }
+}
+/* Dismissible only when there is already a chart behind the card — otherwise
+   closing it would leave an empty page with no way back. */
+function setup(msg,dismissible){
+  const box=document.getElementById("setup");
+  const inp=document.getElementById("sheetInput");
+  document.getElementById("setupHint").textContent=msg||"";
+  if(!inp.value) inp.value=SHEET_ID||DEMO_SHEET;   /* something to edit, not an empty box */
+  document.getElementById("setupClose").hidden=!dismissible;
+  box.hidden=false;
+  inp.focus(); inp.select();
+}
+function hideSetup(){ document.getElementById("setup").hidden=true; }
+document.getElementById("setupClose").addEventListener("click",hideSetup);
+document.getElementById("useOwn").addEventListener("click",()=>setup("",true));
+document.addEventListener("keydown",e=>{
+  const box=document.getElementById("setup");
+  if(e.key==="Escape"&&!box.hidden&&!document.getElementById("setupClose").hidden) hideSetup();
+});
+document.getElementById("setupForm").addEventListener("submit",e=>{
+  e.preventDefault();
+  const id=document.getElementById("sheetInput").value.trim();
+  if(id) location.search="?sheet="+encodeURIComponent(id);
+});
+load();
+</script>
+</body>
+</html>

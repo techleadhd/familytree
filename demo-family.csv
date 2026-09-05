@@ -1,0 +1,55 @@
+name,sex,birth_year,death_year,parents,drive_photo,description
+# Family tree viewer — source code: https://github.com/techleadhd/ftree,,,,,,
+# Any row whose name starts with # is a comment and is ignored.,,,,,,
+# parents holds BOTH parents in one cell — separate the two names with a comma,,,,,,
+# A couple with no children together is a row with only parents filled in.,,,,,,
+Ada Whitfield,F,1902,1988,,,Kept the ledgers for the orchard.
+Peter Whitfield,M,1898,1975,,,Planted the first twelve apple trees in 1924.
+Grace Lindqvist,F,1905,1994,,,Village schoolteacher for forty years.
+Karl Lindqvist,M,1901,1979,,,Boatwright. Built the Sigrid in 1938.
+Rosa Ibarra,F,1907,1990,,,Ran the bakery on Calle Mayor.
+Tomas Ibarra,M,1903,1985,,,Stonemason. Signed his walls with a small star.
+Maria Whitfield,F,1928,,"Ada Whitfield, Peter Whitfield",,Married twice. Kept the orchard going through both.
+Luis Whitfield,M,1931,2011,"Ada Whitfield, Peter Whitfield",,Cider maker. Never learned to swim.
+Clara Whitfield,F,1934,,"Ada Whitfield, Peter Whitfield",,Left for the city at nineteen and stayed.
+Nina Lindqvist,F,1930,2019,"Grace Lindqvist, Karl Lindqvist",,Sang alto in the church choir.
+Owen Lindqvist,M,1933,2004,"Grace Lindqvist, Karl Lindqvist",,Took over the boatyard in 1961.
+Sten Lindqvist,M,1937,,"Grace Lindqvist, Karl Lindqvist",,Emigrated in 1959. Wrote home every Sunday.
+Elena Ibarra,F,1932,,"Rosa Ibarra, Tomas Ibarra",,Baker like her mother. Better bread.
+Mateo Ibarra,M,1935,2001,"Rosa Ibarra, Tomas Ibarra",,Kept bees on the roof.
+Vic Sandoval,M,1926,1998,,,Maria's second husband. Played the accordion badly.
+Sam Lindqvist,M,1956,,"Maria Whitfield, Owen Lindqvist",,Third-generation boatwright.
+Tess Lindqvist,F,1959,,"Maria Whitfield, Owen Lindqvist",,Photographer. Shot the 1988 harvest.
+Hank Sandoval,M,1964,,"Maria Whitfield, Vic Sandoval",,Half-brother to Sam and Tess.
+Ivy Whitfield,F,1958,,"Luis Whitfield, Nina Lindqvist",,Ran the orchard shop until 2015.
+Jonah Whitfield,M,1961,,"Luis Whitfield, Nina Lindqvist",,Long-haul driver. Knows every diner.
+Paloma Ibarra,F,1960,,"Clara Whitfield, Mateo Ibarra",,Raised Mira on her own.
+Rafael Ibarra,M,1963,,"Clara Whitfield, Mateo Ibarra",,Restores church organs.
+Astrid Lindqvist,F,1962,,"Sten Lindqvist, Elena Ibarra",,Marine biologist. Two winters in Svalbard.
+Nils Lindqvist,M,1966,,"Sten Lindqvist, Elena Ibarra",,The family archivist and its only cook.
+Ruth Okafor,F,1962,,,,Married Sam in 1985. Retired midwife.
+Gil Moreau,M,1959,,,,Married Tess in 1987.
+Bea Kowalski,F,1965,,,,Married Hank in 1992. Keeps the accounts.
+Dean Park,M,1957,,,,Married Ivy in 1984.
+Marta Ruiz,F,1967,,,,Married Jonah in 1989.
+Yuki Tanaka,F,1966,,,,Married Rafael in 1991. Cellist.
+Tobias Berg,M,1960,,,,Married Astrid in 1988.
+,,,,"Ivy Whitfield, Dean Park",,
+Nathan Lindqvist,M,1988,,"Sam Lindqvist, Ruth Okafor",,Builds furniture from orchard windfall.
+Rose Lindqvist,F,1991,,"Sam Lindqvist, Ruth Okafor",,Nurse. The one who organises everyone.
+Ollie Lindqvist,M,1994,,"Sam Lindqvist, Ruth Okafor",,Sails the Sigrid every August.
+Elle Moreau,F,1989,,"Tess Lindqvist, Gil Moreau",,Set designer.
+Theo Moreau,M,1992,,"Tess Lindqvist, Gil Moreau",,Teaches maths. Runs the family quiz.
+Cleo Sandoval,F,1995,,"Hank Sandoval, Bea Kowalski",,Vet. Mostly horses.
+Diego Whitfield,M,1990,,"Jonah Whitfield, Marta Ruiz",,Sound engineer.
+Sofia Whitfield,F,1993,,"Jonah Whitfield, Marta Ruiz",,Planted the new orchard rows in 2019.
+Mira Ibarra,F,1992,,Paloma Ibarra,,Grew up above the bakery.
+Kenji Ibarra,M,1994,,"Rafael Ibarra, Yuki Tanaka",,Tunes pianos in three cities.
+Lena Ibarra,F,1997,,"Rafael Ibarra, Yuki Tanaka",,Plays trombone in a brass band.
+Freya Berg,F,1991,,"Astrid Lindqvist, Tobias Berg",,Ice-core researcher.
+Anders Berg,M,1995,,"Astrid Lindqvist, Tobias Berg",,Chef. Argues with Nils about stock.
+Priya Raman,F,1990,,,,Married Nathan in 2016.
+Ben Achebe,M,1988,,,,Married Elle in 2017.
+Ari Lindqvist,M,2018,,"Nathan Lindqvist, Priya Raman",,Named for the boat.
+Isla Lindqvist,F,2021,,"Nathan Lindqvist, Priya Raman",,
+Juno Achebe,F,2019,,"Elle Moreau, Ben Achebe",,

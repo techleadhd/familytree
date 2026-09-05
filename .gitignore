@@ -1,0 +1,6 @@
+.DS_Store
+
+# Any family data: CSV seeds and the scanned diagram. It names living people,
+# and anything committed here would survive in history even after deletion.
+# The sheet is the source of truth; none of this belongs in a repo.
+*.png
