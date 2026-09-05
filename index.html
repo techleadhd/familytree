@@ -64,10 +64,9 @@ main{flex:1; position:relative; overflow:hidden}
 .link{stroke:var(--rule); stroke-width:1; fill:none}
 .link.cross{stroke:var(--rule)}
 /* The selected person's line of descent, drawn over the sage rules in its own
-   layer under the boxes. A cross-link is one path for one child, so it can be
-   lit in place instead. */
+   layer under the boxes. */
 .lit-link{fill:none; stroke:var(--pine); stroke-width:2.25; stroke-linecap:round}
-.link.lit{stroke:var(--pine); stroke-width:2.25}
+.link.lit{stroke:var(--pine); stroke-width:2.25}   /* a dipped bar, lit in place */
 .person{cursor:pointer}
 .person .hit{fill:transparent}
 /* A clicked person keeps DOM focus, and the UA's own ring for that is a blue
@@ -323,7 +322,7 @@ const gviz = (id, tab, cb) =>
 
 /* ---- geometry ---- */
 const BOX_W=152, PAIR_GAP=30, SIB_GAP=26, GROUP_GAP=44,
-      SOLO_DROP=56, PAD=70, GUTTER=50, DESC_CHARS=27;
+      PAD=70, GUTTER=50, DESC_CHARS=27;
 
 /* One box, one size. There used to be a second, shorter box that the zoom
    switched to, on the theory that ten lines of description are a grey smear
@@ -332,16 +331,38 @@ const BOX_W=152, PAIR_GAP=30, SIB_GAP=26, GROUP_GAP=44,
    being pinched or framed, two-pass measuring in every function that chooses a
    zoom, and a hysteresis band so the thing wouldn't flap on the way past. The
    box people zoom into is the box they see. */
-const BOX_BASE=176, GEN_BASE=300, DESC_LINES=10, PHOTO_R=32;
+const BOX_BASE=176, GEN_BASE=330, DESC_LINES=10, PHOTO_R=32;
 /* Room for a face at the top of a box, added only when the sheet actually has
    photos in it — until the first one is filled in, nobody pays for the empty
    band. */
 const PHOTO_TOP=6;
-/* Cross-links run in their own lane, below every sibling bus (which sit at
-   +5 and +56 under a box) and still clear of the next generation. Sharing a
-   y with a bus is what made them unreadable: a long line lying exactly on a
-   short one reads as a single continuous bus. */
-const CROSS_LANE=88, CROSS_STEP=8, HOP=4;
+/* Everything a row hangs below itself lives on a ladder of lanes, and a bus
+   takes the first lane where it doesn't run into another bus. Two buses at one
+   height with overlapping spans read as a single line — which is how a person
+   with two marriages ends up looking like two fathers for the same child.
+   LANE_GAP is the clearance two buses need before they count as clear of each
+   other. The ladder has to fit in GEN_BASE-BOX_BASE, so the last lane still
+   leaves a stub's worth of room above the next row. */
+const LANE0=22, LANE_STEP=24, LANE_MAX=4, LANE_GAP=34, HOP=4;
+/* How far an only child may sit off a single parent's centre before the jog is
+   worth drawing rather than absorbing. A quarter of a box: past that the line
+   would leave the parent visibly off centre. A couple gets less — see
+   snapReach — because their drop has to stay on the marriage bar. */
+const SNAP=38;
+/* And how far a single child's stub may be pulled sideways onto the drop when
+   the two nearly coincide. A couple's children are centred as a group, so one
+   of them regularly lands two or three pixels off the drop — far enough to
+   turn the bus into a dogleg, not far enough for the dogleg to mean anything.
+   Eight is well under half a box, so the stub still reads as centred. */
+const STUB_SNAP=8;
+/* A third marriage cannot sit next to the person: a row is one-dimensional, so
+   only two partners can flank them and any others are separated by whoever is
+   in between. Such a bar dips *under* the row rather than running through the
+   boxes — under, not over, because everything above a row arrives from the
+   parents and a line up there reads as descent. It leaves each partner's box
+   bottom, runs along a lane of its own, and this union's children hang from a
+   lane below that. */
+const DIP_IN=34;
 let hasPhotos=false;
 let BOX_H, GEN_H, DROP, PHOTO_BAND;
 /* The only thing that still varies is whether the sheet has photos in it, and
@@ -349,7 +370,7 @@ let BOX_H, GEN_H, DROP, PHOTO_BAND;
 function setMetrics(){
   PHOTO_BAND=hasPhotos?PHOTO_TOP+PHOTO_R*2:0;
   BOX_H=BOX_BASE+PHOTO_BAND; GEN_H=GEN_BASE+PHOTO_BAND;
-  DROP=BOX_H/2+5;                  /* the sibling bus hangs just below the boxes */
+  DROP=BOX_H/2+LANE0;              /* a couple's bar to the first lane */
 }
 setMetrics();
 
@@ -747,6 +768,9 @@ let root, view={x:0,y:0,k:1}, totalW=0, totalH=0;
    coordinates away along with the elements. */
 const linkGeom=new Map();
 let litLayer=null;
+/* the verticals of the current render, so the bold overlay can arc over the
+   same things the line under it arcs over */
+let lastVerticals=[];
 
 const sexClass = s => s==="M" ? "m" : s==="F" ? "f" : "u";
 
@@ -765,6 +789,53 @@ function hops(x0,x1,y,verticals){
     d+=`L${right?x-HOP:x+HOP} ${y}`
       +`A${HOP} ${HOP} 0 0 ${right?1:0} ${right?x+HOP:x-HOP} ${y}`;
   return d+`L${x1} ${y}`;
+}
+
+/* Would this cross-link be indistinguishable from an ordinary sibling stub?
+   Only if the child sits one generation below its parents — the row a bus
+   already serves — and the run from the drop to its stub passes over nobody
+   else's box, in either row. Anything else keeps its lane. */
+/* Somebody else's box standing between two partners. */
+function between(a,b){
+  const lo=Math.min(a.x,b.x)+BOX_W, hi=Math.max(a.x,b.x);
+  for(const q of P.values())
+    if(q!==a&&q!==b&&q.x!=null&&q.gen===a.gen&&q.x+BOX_W>lo+1&&q.x<hi-1) return true;
+  return false;
+}
+/* The empty corridor between two boxes in the row that is nearest the middle of
+   the span. A lifted bar's children have to drop through the row to reach their
+   bus, and this is where they can do it without crossing anyone. */
+function corridor(a,b){
+  const lo=Math.min(a.x,b.x)+BOX_W, hi=Math.max(a.x,b.x), mid=(lo+hi)/2;
+  const row=[...P.values()]
+    .filter(q=>q.x!=null&&q.gen===a.gen&&q.x+BOX_W>lo-1&&q.x<hi+1)
+    .sort((p,q)=>p.x-q.x);
+  let best=mid, bd=Infinity;
+  for(let i=0;i<row.length-1;i++){
+    const g0=row[i].x+BOX_W, g1=row[i+1].x;
+    if(g1-g0<10) continue;
+    const c=(g0+g1)/2, d=Math.abs(c-mid);
+    if(d<bd){ bd=d; best=c; }
+  }
+  return best;
+}
+
+function inlineCross(uid,kid){
+  const u=U.get(uid), k=P.get(kid);
+  if(!k||k.x==null) return false;
+  const a=P.get(u.a), b=P.get(u.b);
+  const pair=a&&b&&a.x!=null&&b.x!=null;
+  const anchor=(a&&a.x!=null)?a:b;
+  if(!anchor||anchor.x==null||k.gen!==anchor.gen+1) return false;
+  const midX=pair?(Math.min(a.x,b.x)+BOX_W+Math.max(a.x,b.x))/2:anchor.x+BOX_W/2;
+  const lo=Math.min(midX,k.x+BOX_W/2), hi=Math.max(midX,k.x+BOX_W/2);
+  const own=new Set([...(kidsOf.get(uid)||[]),u.a,u.b]);
+  for(const q of P.values()){
+    if(q.x==null||own.has(q.id)) continue;
+    if(q.gen!==k.gen&&q.gen!==anchor.gen) continue;
+    if(q.x+BOX_W>lo&&q.x<hi) return false;
+  }
+  return true;
 }
 
 function render(){
@@ -786,74 +857,176 @@ function render(){
     bands.appendChild(el("rect",{
       x:0,y:(g-1)*GEN_H+PAD-24,width:totalW,height:BOX_H+48,class:"gen-band"}));
 
+  /* A cross-link exists because the layout could only place a child's chain
+     once — two children of the same parents who married each other, say, come
+     back as one claimed chain and one "remote" child. But a remote child that
+     ends up in the row directly below its parents, with nothing between the
+     drop and its own stub, is just a sibling on a slightly longer bus. Draw it
+     as a plain T there; the lane is for runs that pass over other families,
+     where a long line at bus height would read as somebody else's bus. */
+  const inline=new Set();
+  for(const {uid,kid} of crossLinks) if(inlineCross(uid,kid)) inline.add(uid+"\u0000"+kid);
+
   const lines=el("g"); root.appendChild(lines);
   /* between the rules and the boxes: bold lineage passes behind a box, never
      over its text */
   litLayer=el("g"); root.appendChild(litLayer);
   const nodes=el("g"); root.appendChild(nodes);
   linkGeom.clear();
-  /* every vertical drawn so far, so cross-links can hop the ones they cross */
-  const verticals=[];
+  /* Verticals go down first and horizontals last, so that every horizontal can
+     arc over every vertical it passes — a crossing that isn't marked reads as a
+     junction, which is how somebody ends up in the wrong family. A run never
+     hops its own drop or stubs: those touch it at an endpoint rather than
+     crossing it, and hops() only arcs verticals whose span straddles the
+     line. */
+  const verticals=[], runs=[];
+  const dips=[];                     /* marriage bars that have to go under the row */
+  const laneRuns=[];                 /* buses drawn in the second pass, so they can hop */
+  /* Which stretches of which lane are taken, per row. A bus asks for the first
+     lane where nothing else is in its way; two that overlap can never share a
+     height, because at one height they read as one line. */
+  const rowLanes=new Map();
+  function laneFor(rowY,lo,hi,first){
+    const lanes=rowLanes.get(rowY)||[]; rowLanes.set(rowY,lanes);
+    for(let i=first;i<LANE_MAX;i++){
+      lanes[i]=lanes[i]||[];
+      if(lanes[i].every(([x0,x1])=>hi<x0-LANE_GAP||lo>x1+LANE_GAP)){
+        lanes[i].push([lo,hi]); return i;
+      }
+    }
+    /* out of ladder: share the last one rather than run into the next row */
+    (lanes[LANE_MAX]=lanes[LANE_MAX]||[]).push([lo,hi]);
+    return LANE_MAX;
+  }
+  const laneY=(rowY,i)=>rowY+BOX_H+LANE0+i*LANE_STEP;
 
   for(const u of U.values()){
     const a=P.get(u.a), b=P.get(u.b);
     const kids=(kidsOf.get(u.id)||[]).map(k=>P.get(k)).filter(k=>k&&k.x!=null);
-    let barY, midX, drop=DROP;
-    const geom={bar:null,barY:null,midX:null,busY:null,kids:new Map(),cross:new Map()};
+    let barY, midX, rowY, snapReach=0, firstLane=0;
+    const geom={bar:null,dipSpan:null,dipParts:[],barY:null,midX:null,busY:null,kids:new Map()};
     linkGeom.set(u.id,geom);
 
     if(a&&b&&a.x!=null&&b.x!=null){
-      barY=a.y+BOX_H/2;
       const left=Math.min(a.x,b.x), right=Math.max(a.x,b.x);
-      lines.appendChild(el("line",{x1:left+BOX_W,y1:barY,x2:right,y2:barY,class:"link"}));
-      midX=(left+BOX_W+right)/2;
-      geom.bar={x1:left+BOX_W,x2:right};
+      rowY=Math.min(a.y,b.y);
+      if(between(a,b)){
+        /* Not side by side, so the bar cannot run at bar height without going
+           straight through whoever is in between — and neither can a drop taken
+           from the middle of it. Dip under the row instead: down from each
+           partner's box bottom, across beneath everyone in between, and the
+           children hang from their own bus below that. */
+        const dipLane=laneFor(rowY,left+BOX_W-DIP_IN,right+DIP_IN,0);
+        barY=laneY(rowY,dipLane);
+        firstLane=dipLane+1;            /* the children hang below their own bar */
+        midX=(left+right+BOX_W)/2;
+        geom.dipSpan={x1:left+BOX_W-DIP_IN,x2:right+DIP_IN,top:rowY+BOX_H};
+        dips.push({uid:u.id,...geom.dipSpan,y:barY});
+        runs.push({x0:left+BOX_W-DIP_IN,x1:right+DIP_IN,y:barY,dipOf:u.id});
+      }else{
+        barY=rowY+BOX_H/2;
+        runs.push({x0:left+BOX_W,x1:right,y:barY});
+        midX=(left+BOX_W+right)/2;
+        geom.bar={x1:left+BOX_W,x2:right};
+        /* a couple's drop has to come off the marriage bar, and the bar is only
+           the gap between their boxes wide */
+        snapReach=(right-left-BOX_W)/2;
+      }
     } else {
       const solo=a&&a.x!=null?a:(b&&b.x!=null?b:null);
       if(!solo) continue;
-      barY=solo.y+BOX_H; midX=solo.x+BOX_W/2; drop=SOLO_DROP;
+      rowY=solo.y; barY=solo.y+BOX_H; midX=solo.x+BOX_W/2;
+      snapReach=SNAP;                 /* a single parent's "bar" is their box */
     }
     geom.barY=barY; geom.midX=midX;
 
-    const remote=new Set(crossLinks.filter(c=>c.uid===u.id).map(c=>c.kid));
-    const local=kids.filter(k=>!remote.has(k.id));
-    if(!local.length) continue;
+    const remote=crossLinks
+      .some(c=>c.uid===u.id&&!inline.has(c.uid+"\u0000"+c.kid));
+    if(!kids.length) continue;
 
-    const busY=barY+drop;
+    /* An only child sitting all but under the drop. Their x comes from packing
+       the whole sibling group — which can include the children of a partner's
+       other union — so it lands a few pixels off the parent's own centre, and
+       the bus degenerates into a stair-step that reads as a mistake rather
+       than as a junction. Inside snapReach, run one straight line to the child:
+       on a 152px box nobody can see that it leaves the parent slightly off
+       centre, and everybody can see the kink. */
+    if(!remote&&kids.length===1){
+      const k=kids[0], cx=k.x+BOX_W/2;
+      if(Math.abs(cx-midX)<=snapReach){
+        lines.appendChild(el("line",{x1:cx,y1:barY,x2:cx,y2:k.y,class:"link"}));
+        verticals.push({x:cx,y1:barY,y2:k.y});
+        /* the lit-lineage path is built from these: a bus at the child's own
+           top and midX collapses its two horizontals to nothing, leaving the
+           same single line */
+        geom.busY=k.y; geom.midX=cx;
+        geom.kids.set(k.id,{x:cx,y:k.y});
+        continue;
+      }
+    }
+
+    /* A stub that lands a few pixels off the drop leaves a bus too short to
+       read as a bus: it becomes a step in what looks like one line. Put that
+       stub on the drop instead — a few pixels off a 152px box is invisible,
+       the step is not. */
+    const stubs=kids.map(k=>{
+      const cx=k.x+BOX_W/2;
+      return {id:k.id, x:Math.abs(cx-midX)<=STUB_SNAP?midX:cx, y:k.y};
+    });
+    const lo=Math.min(...stubs.map(t=>t.x),midX), hi=Math.max(...stubs.map(t=>t.x),midX);
+    const busY=laneY(rowY,laneFor(rowY,lo,hi,firstLane));
     geom.busY=busY;
+
+    /* A union with a child the layout could not place beside their siblings
+       waits for the second pass: its bus is long enough to cross other
+       families' verticals, and it can only hop what has already been drawn. */
+    if(remote){ laneRuns.push({uid:u.id,barY,midX,busY,stubs}); continue; }
+
     lines.appendChild(el("line",{x1:midX,y1:barY,x2:midX,y2:busY,class:"link"}));
     verticals.push({x:midX,y1:barY,y2:busY});
-    const centres=local.map(k=>k.x+BOX_W/2);
-    lines.appendChild(el("line",{
-      x1:Math.min(...centres,midX),y1:busY,x2:Math.max(...centres,midX),y2:busY,class:"link"}));
-    for(const k of local){
-      lines.appendChild(el("line",{x1:k.x+BOX_W/2,y1:busY,x2:k.x+BOX_W/2,y2:k.y,class:"link"}));
-      verticals.push({x:k.x+BOX_W/2,y1:busY,y2:k.y});
-      geom.kids.set(k.id,{x:k.x+BOX_W/2,y:k.y});
+    runs.push({x0:lo,x1:hi,y:busY});
+    for(const t of stubs){
+      lines.appendChild(el("line",{x1:t.x,y1:busY,x2:t.x,y2:t.y,class:"link"}));
+      verticals.push({x:t.x,y1:busY,y2:t.y});
+      geom.kids.set(t.id,{x:t.x,y:t.y});
     }
   }
 
-  const laneUsed=new Map();          /* one lane per cross-link, per row */
-  for(const {uid,kid} of crossLinks){
-    const u=U.get(uid), k=P.get(kid);
-    if(!k||k.x==null) continue;
-    const a=P.get(u.a), b=P.get(u.b);
-    const anchor=a&&a.x!=null?a:b;
-    if(!anchor||anchor.x==null) continue;
-    const barY=anchor.y+BOX_H/2;
-    const midX=(a&&b&&a.x!=null&&b.x!=null)
-      ? (Math.min(a.x,b.x)+BOX_W+Math.max(a.x,b.x))/2 : anchor.x+BOX_W/2;
-    const n=laneUsed.get(anchor.y)||0; laneUsed.set(anchor.y,n+1);
-    const lane=anchor.y+BOX_H+CROSS_LANE+n*CROSS_STEP;
-    const cx=k.x+BOX_W/2;
-    const path=el("path",{
-      d:`M${midX} ${barY}V${lane}`+hops(midX,cx,lane,verticals)+`V${k.y}`,
-      class:"link cross"});
-    lines.appendChild(path);
-    const geom=linkGeom.get(uid); if(geom) geom.cross.set(kid,path);
-    /* later cross-links hop this one too */
-    verticals.push({x:midX,y1:barY,y2:lane},{x:cx,y1:lane,y2:k.y});
+  /* A dipped bar's two legs. The bar itself is a run like any other. */
+  for(const d of dips){
+    const g=linkGeom.get(d.uid);
+    for(const x of [d.x1,d.x2]){
+      const leg=el("line",{x1:x,y1:d.top,x2:x,y2:d.y,class:"link"});
+      lines.appendChild(leg);
+      verticals.push({x,y1:d.top,y2:d.y});
+      if(g) g.dipParts.push(leg);
+    }
   }
+
+  /* A union with a far-flung child: one bus in a lane of its own, with a stub
+     down to every child — the far ones on the same line as their siblings,
+     which is the whole point of moving the bus down here. */
+  for(const r of laneRuns){
+    const g=linkGeom.get(r.uid);
+    lines.appendChild(el("line",{x1:r.midX,y1:r.barY,x2:r.midX,y2:r.busY,class:"link"}));
+    verticals.push({x:r.midX,y1:r.barY,y2:r.busY});
+    const xs=r.stubs.map(t=>t.x);
+    runs.push({x0:Math.min(...xs,r.midX),x1:Math.max(...xs,r.midX),y:r.busY});
+    for(const t of r.stubs){
+      lines.appendChild(el("line",{x1:t.x,y1:r.busY,x2:t.x,y2:t.y,class:"link"}));
+      verticals.push({x:t.x,y1:r.busY,y2:t.y});
+      if(g) g.kids.set(t.id,{x:t.x,y:t.y});
+    }
+  }
+
+  /* Last: every horizontal, now that it knows what it has to hop. */
+  for(const r of runs){
+    const path=el("path",{class:"link",
+      d:`M${r.x0} ${r.y}`+hops(r.x0,r.x1,r.y,verticals)});
+    lines.appendChild(path);
+    if(r.dipOf){ const g=linkGeom.get(r.dipOf); if(g) g.dipParts.push(path); }
+  }
+  lastVerticals=verticals;           /* the bold overlay hops the same things */
 
   for(const p of P.values()){
     if(p.x==null) continue;
@@ -1080,31 +1253,25 @@ let selectedId=null, compareId=null, picking=false;
    child-in-the-line. A half-sibling's edge carries `bar:false` — the run to
    the shared parent belongs in the picture, the parent's other marriage does
    not. */
-function kinRun(id){
-  const boxes=new Set(), edges=[], seen=new Set();
-  (function up(pid){
-    if(seen.has(pid)) return;         /* a cousin marriage can rejoin a branch */
-    seen.add(pid);
-    const q=P.get(pid); if(!q||!q.parentUnion) return;
-    const u=U.get(q.parentUnion); if(!u) return;
-    edges.push({uid:u.id,kid:pid});
-    for(const s of [u.a,u.b]) if(s&&P.has(s)){ boxes.add(s); up(s); }
-  })(id);
-
-  const pu=U.get((P.get(id)||{}).parentUnion);
-  if(pu){
-    for(const sib of kidsOf.get(pu.id)||[])
-      if(sib!==id&&P.has(sib)){ boxes.add(sib); edges.push({uid:pu.id,kid:sib}); }
-    for(const parent of [pu.a,pu.b]){
-      const par=P.get(parent); if(!par) continue;
-      for(const uid of par.unions){
-        if(uid===pu.id) continue;
-        for(const k of kidsOf.get(uid)||[])
-          if(P.has(k)){ boxes.add(k); edges.push({uid,kid:k,bar:false}); }
-      }
-    }
+function kinRun(keep){
+  const edges=[], bars=[], halves=[];
+  for(const u of U.values()){
+    const aIn=u.a&&keep.has(u.a), bIn=u.b&&keep.has(u.b);
+    if(!aIn&&!bIn) continue;
+    const kids=(kidsOf.get(u.id)||[]).filter(k=>keep.has(k));
+    for(const kid of kids) edges.push({uid:u.id,kid});
+    if(!P.has(u.a)||!P.has(u.b)) continue;
+    /* Both partners highlighted means the marriage itself is part of the
+       picture, so the whole bar is bold. */
+    if(aIn&&bIn){ bars.push(u.id); continue; }
+    /* One partner is somebody the selection dims — a half-sibling's other
+       parent, say. Their half of the bar stays thin, but the run from the drop
+       to the kept parent's own box is bold, or the line up from the child ends
+       in mid-air short of the person it connects to, which is what makes it
+       look broken. */
+    if(kids.length) halves.push({uid:u.id,partner:aIn?u.a:u.b,other:aIn?u.b:u.a});
   }
-  return {boxes,edges};
+  return {edges,bars,halves};
 }
 
 /* Retrace the selection's line of descent in bold. The run for one child is
@@ -1116,32 +1283,47 @@ function paintLineage(){
   litLayer.textContent="";
   for(const n of svg.querySelectorAll(".link.lit")) n.classList.remove("lit");
   if(!selectedId) return;
-  const {edges}=kinRun(selectedId);
-  const barsDone=new Set();
-  for(const {uid,kid,bar} of edges){
+  const {edges,bars,halves}=kinRun(lineage(selectedId));
+  for(const uid of bars){
     const g=linkGeom.get(uid); if(!g) continue;
-    const cross=g.cross.get(kid);
-    if(cross) cross.classList.add("lit");     /* one path, one child: light it in place */
-    else{
-      const k=g.kids.get(kid);
-      if(k&&g.busY!=null)
-        litLayer.appendChild(el("path",{class:"lit-link",
-          d:`M${k.x} ${k.y}V${g.busY}H${g.midX}V${g.barY}`}));
-    }
-    if(g.bar&&bar!==false&&!barsDone.has(uid)){
-      barsDone.add(uid);
+    if(g.bar) litLayer.appendChild(el("path",{class:"lit-link",
+      d:`M${g.bar.x1} ${g.barY}H${g.bar.x2}`}));
+    else for(const part of g.dipParts) part.classList.add("lit");   /* dipped bar */
+  }
+  for(const {uid,partner,other} of halves){
+    const g=linkGeom.get(uid); if(!g) continue;
+    const p=P.get(partner), o=P.get(other);
+    if(!p||!o||p.x==null||o.x==null) continue;
+    const keptOnLeft=p.x<o.x;
+    /* Only as far as the kept parent: their half of the bar, or — when the bar
+       had to dip under the row — the leg on their side and the stretch of lane
+       back to the drop. Either way the bold reaches the person instead of
+       ending at the T. */
+    if(g.bar)
       litLayer.appendChild(el("path",{class:"lit-link",
-        d:`M${g.bar.x1} ${g.barY}H${g.bar.x2}`}));
+        d:`M${keptOnLeft?g.bar.x1:g.bar.x2} ${g.barY}H${g.midX}`}));
+    else if(g.dipSpan){
+      const legX=keptOnLeft?g.dipSpan.x1:g.dipSpan.x2;
+      litLayer.appendChild(el("path",{class:"lit-link",
+        d:`M${legX} ${g.dipSpan.top}V${g.barY}`+hops(legX,g.midX,g.barY,lastVerticals)}));
     }
+  }
+  for(const {uid,kid} of edges){
+    const g=linkGeom.get(uid); if(!g) continue;
+    const k=g.kids.get(kid);
+    if(k&&g.busY!=null)
+      litLayer.appendChild(el("path",{class:"lit-link",
+        d:`M${k.x} ${k.y}V${g.busY}`+hops(k.x,g.midX,g.busY,lastVerticals)+`V${g.barY}`}));
   }
 }
 
-/* Everyone a selection keeps at full strength: the line up, the line down,
-   and the row you stand in — siblings, full and half. Siblings hang off a
-   parent union that the up-walk passes straight through, so without this they
-   were the one close relative the panel named and the chart greyed out. Their
-   partners and children are left dim on purpose: a sibling is a relative, a
-   sibling's in-laws are where the highlight would stop meaning anything. */
+/* Everyone a selection keeps at full strength: every ancestor, the row you
+   stand in — siblings, full and half — and one step down, to partners and
+   children. Siblings hang off a parent union that the up-walk passes straight
+   through, so without this they were the one close relative the panel named
+   and the chart greyed out. A sibling's partner and children are left dim on
+   purpose, and so are grandchildren: a relative is a relative, and their
+   in-laws are where the highlight would stop meaning anything. */
 function lineage(id){
   const keep=new Set([id]);
   const pu=U.get((P.get(id)||{}).parentUnion);
@@ -1158,15 +1340,18 @@ function lineage(id){
     const u=U.get(q.parentUnion); if(!u) return;
     for(const s of [u.a,u.b]) if(s&&!keep.has(s)){keep.add(s);up(s);}
   })(id);
-  (function down(pid){
-    const q=P.get(pid); if(!q) return;
-    for(const uid of q.unions){
-      const u=U.get(uid);
-      const other=u.a===pid?u.b:u.a;
-      if(other) keep.add(other);
-      for(const kid of kidsOf.get(uid)||[]) if(!keep.has(kid)){keep.add(kid);down(kid);}
-    }
-  })(id);
+  /* Down exactly one step: partners, and the children of each marriage.
+     Walking the whole descent instead lit up half the chart from anyone old
+     enough to have grandchildren, which says nothing about the person you
+     clicked. Up is different — a line of ancestors is finite and is the thing
+     people came to see. */
+  const me=P.get(id);
+  if(me) for(const uid of me.unions){
+    const u=U.get(uid); if(!u) continue;
+    const other=u.a===id?u.b:u.a;
+    if(other) keep.add(other);
+    for(const kid of kidsOf.get(uid)||[]) keep.add(kid);
+  }
   return keep;
 }
 
@@ -1175,12 +1360,14 @@ function lineage(id){
    render() ends by calling this. */
 function repaint(){
   const keep=selectedId?lineage(selectedId):null;
-  const kin=selectedId?kinRun(selectedId).boxes:null;
+
   const q=document.getElementById("find").value.trim().toLowerCase();
   document.querySelectorAll(".person").forEach(n=>{
     const id=n.dataset.id, p=P.get(id);
     n.classList.toggle("sel",id===selectedId);
-    n.classList.toggle("kin",!!kin&&kin.has(id));
+    /* bold border for everyone the selection keeps, except the selected person,
+       who has their own — dimming and bolding are the same set by construction */
+    n.classList.toggle("kin",!!keep&&keep.has(id)&&id!==selectedId);
     n.classList.toggle("cmp",id===compareId);
     n.classList.toggle("dim",!!keep&&!keep.has(id)&&id!==compareId);
     n.classList.toggle("hit-match",!!q&&label(p).toLowerCase().includes(q));

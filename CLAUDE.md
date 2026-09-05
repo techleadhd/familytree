@@ -125,8 +125,78 @@ works until the first remarriage.
 
 4. **Connectors** — four primitives, all axis-aligned: a marriage bar between
    partners, a drop line from its midpoint, a horizontal sibling bus, and short
-   stubs down to each child. Cross-links (below) are the fifth primitive and
-   the only one that isn't local. This is why the layout is hand-rolled rather than
+   stubs down to each child. Everything a row hangs below itself lives on a
+   **ladder of lanes** — `LANE0` (+22) and every `LANE_STEP` (24) below it — and
+   `laneFor()` gives a bus the first lane where nothing else is in its way,
+   `LANE_GAP` being the clearance two buses need to count as clear of each
+   other. Height is assigned by conflict, not by kind: a lone couple's bus sits
+   at +22, and a second bus in that row only moves down if it would actually
+   run into the first.
+
+   This is what stops one person's several marriages from reading as one
+   marriage. Their unions' buses all start life at the same height, overlapping
+   in x because they share a partner, and at one height two overlapping buses
+   are one line — a child then appears to hang off a bus belonging to somebody
+   else's marriage, which is how a chart ends up showing two fathers for the
+   same person. A dipped bar takes a lane too, and its children take one below
+   it (`firstLane`); a bus with a far-flung child is simply wide, so it
+   conflicts with everything and lands near the bottom of the ladder on its
+   own.
+
+   **Verticals are drawn first and horizontals last**, so every horizontal can
+   arc over every vertical it crosses — not just the long lane runs, which is
+   all that used to hop. A dipped bar's legs crossing a sibling bus, a lane
+   bus's drop crossing an ordinary one: unmarked, each of those reads as a
+   junction, and a junction is how somebody ends up in the wrong family. A run
+   never hops its own drop or stubs, because `hops()` only arcs verticals whose
+   span straddles the line, and those touch it at an endpoint.
+
+   `GEN_BASE-BOX_BASE = 154` is the gap under a row, which fits `LANE_MAX`+1
+   lanes and still leaves the lowest one a stub's worth of room; past that a bus
+   shares the last lane rather than colliding with the next generation. The
+   first lane used to sit at +5 and read as an underline on the boxes rather
+   than as a connector — the spacing is what makes them legible as separate
+   things. **An only child within `snapReach` of the drop
+   gets one straight line instead of all four.** Their x comes from packing the
+   whole sibling group — which can include the children of a partner's other
+   union — so it can land a handful of pixels off the parent's own centre, and
+   the bus then degenerates into a stair-step that reads as a rendering bug
+   rather than a junction. Nobody can see a line leaving a 152px box a few
+   pixels off centre; everybody can see the kink. `snapReach` is `SNAP` (38, a
+   quarter box) for a single parent, whose "bar" is the whole box bottom, but
+   only half the gap between the boxes for a couple, because their drop has to
+   stay on the marriage bar — snap further and the line appears to come out of
+   one partner alone, which says something false about who the parents are.
+
+   The same rounding shows up with several children: a couple's children are
+   centred as a group, so one of them regularly lands two or three pixels off
+   the drop, and the bus between them becomes a step in what looks like one
+   line. `STUB_SNAP` (8) puts such a stub on the drop instead. Both fixes are
+   the same trade: a few pixels off the centre of a 152px box cannot be seen,
+   and a three-pixel dogleg in a connector can — people read it as a bug,
+   because it is one. Neither moves a box; they only move where a line is
+   drawn.
+
+   **A row is one-dimensional, so a third marriage cannot sit next to the
+   person.** Only two partners can flank someone; any others end up separated by
+   whoever the chain put in between, and their bar used to run at bar height
+   straight through that person's box — with the children's drop, taken from
+   the midpoint of the span, going through it too. `between()` detects it and
+   the bar **dips under the row**: down from each partner's box bottom
+   (`DIP_IN` inside the inner edge), along `DIP_LANE`, hopping any stub it
+   passes, and back up into the other partner. This union's children then hang
+   from a bus `DIP_DROP` below that lane, clear of the +5 bus every other couple
+   in the row uses.
+
+   Under, not over. The first version went over the top and was wrong: every
+   line above a row arrives from the parents, so a horizontal up there reads as
+   descent — it looked like the couple had a parent in common. Below the row is
+   where connections between people in the same row belong. Dips are drawn in
+   the second pass, with the cross-links, because that is when every vertical
+   they might have to hop is known.
+
+   Cross-links (below) are the fifth primitive and the only one that isn't
+   local. This is why the layout is hand-rolled rather than
    dagre or elk — generic graph layouters produce diagonal splines and will
    separate a married couple to reduce edge crossings.
 
@@ -205,17 +275,36 @@ and `repaint()` redraws the bold run from them.
 
 ## The selected lineage
 
-Selecting someone dims everyone off their line — `lineage` is the line up, the
-line down, and the row they stand in (siblings and half-siblings, whose
-partners and children stay dim). Siblings hang off a parent union the up-walk
-passes straight through, so they have to be added explicitly. On top
-of that, their **ancestry and their siblings** are drawn in bold — pine
-connectors from the person up to every ancestor and sideways to each sibling,
-and a heavier pine border on those boxes (`.kin`, 1.75 against the selection's
-marine 2.75, so the person you clicked still leads). Descendants stay undimmed but
-unbolded: the bold reads up and across, which keeps a large family from
-becoming a solid green mesh. A half-sibling's edge carries `bar:false`, so the
-run to the shared parent is bold but the parent's other marriage bar is not.
+Selecting someone dims everyone off their line — `lineage` is **every ancestor,
+the row they stand in** (siblings and half-siblings, whose partners and children
+stay dim) **and one step down**: partners and children. Siblings hang off a
+parent union the up-walk passes straight through, so they have to be added
+explicitly. The walk down used to be recursive, and from anyone old enough to
+have grandchildren it lit half the chart — a set that large says nothing about
+the person you clicked. Up stays unlimited, because a line of ancestors is
+finite and is the thing people came to see. On top
+of that, **everyone the selection keeps is drawn in bold** — pine connectors to
+every ancestor, sibling, partner and child, and a heavier pine
+border on those boxes (`.kin`, 1.75 against the selection's marine 2.75, so the
+person you clicked still leads). Bolding and dimming are the same set by
+construction: both come from `lineage()`, so a box can never be bright with a
+thin line into it, which is what the first version did — it bolded ancestors
+only, and a highlighted spouse or child hung off a hairline.
+
+`kinRun()` turns that set into edges: for every union with a kept partner, the
+line to each kept child is bold, and the **bar** is bold only when *both*
+partners are kept. That distinction is the whole trick — a sibling's husband or
+a parent's second wife is dimmed, so their marriage bar stays thin while the
+line down to the child still lights up.
+
+When only one partner is kept, though, the bar is still bold **from the drop to
+that partner's own box** (`halves`) — half of the T, not the whole bar. Without
+it the bold run from a half-sibling climbed to the marriage bar and stopped in
+mid-air, a box's width short of the parent it was connecting to, and the whole
+path read as broken. The same applies when that bar had to dip under the row:
+`dipSpan` is kept for exactly this, so the overlay can light the leg on the kept
+parent's side and the stretch of lane back to the drop, hops and all. A bold run
+should always end on a person or on another bold run, never at a junction.
 
 The bold is a **separate overlay**, not a class on the existing rules, because
 the run for one child is not the same as the segments under it: its own stub,
@@ -305,7 +394,16 @@ brick red, which claimed a second meaning the panel's sentence already carried.
   if it ever bites.
 - **Cross-links.** When two branches reconnect, whichever branch reaches a
   person first claims them, and the other has to draw a long connector to
-  where they actually sit. Currently two of these, one of them 2,232px long.
+  where they actually sit. Not every one of them deserves a lane, though:
+  `inlineCross()` promotes a cross-link back onto the ordinary sibling bus when
+  the child sits one generation below its parents — the row the bus already
+  serves — and the run from the drop to its stub passes over nobody else's box
+  in either row. That covers the common shape where two children of the same
+  couple marry each other, or a placeholder ancestor ("China") stands above both
+  spouses: the layout can only place their shared chain once, so the second
+  child comes back remote, but drawn it is just a sibling on a slightly longer
+  bus. The lane is for runs that pass over other families, where a long line at
+  bus height reads as somebody else's bus. Currently two of these, one of them 2,232px long.
   Inherent to strict generational banding — the alternative is duplicating
   people, which is worse: one box per person is what makes selection, dimming
   and the relationship finder unambiguous. `sort_order` to pin horizontal
@@ -323,8 +421,28 @@ brick red, which claimed a second meaning the panel's sentence already carried.
   spans the lane. Every real junction in this chart is a T, so a crossing was
   already distinguishable; the hop makes it unambiguous.
 
-  `verticals` accumulates as the local passes draw, and cross-links push their
-  own segments as they go, so a second cross-link hops the first. Only the
+  **A far-flung child takes the whole bus down with them.** There used to be
+  two lines: the sibling bus at its usual +5 for the children the layout could
+  place together, and a separate cross-link running the length of the chart in
+  a lane below for the one it couldn't — two long rails, joined at one end,
+  each hopping the other's stubs. Siblings drawn on two different lines is
+  exactly backwards. Now a union with any remote child puts its **entire** bus
+  in the lane and hangs every child off that one straight run, near ones and
+  far. Same primitives as any other union — drop, bus, stubs — only lower, and
+  the run hops the verticals it passes under, which is the one thing an
+  ordinary bus never has to do.
+
+  It does not get a special height any more — it asks `laneFor()` like every
+  other bus, and because it is wide it conflicts with everything and lands on a
+  lane of its own. The point stands: a long bus at a height another bus already
+  occupies lies on top of it, and their children appear to hang off yours.
+
+  These buses are drawn in the second pass, after every vertical is known, so
+  they can hop. `lastVerticals` keeps that list for `paintLineage()`, so the
+  bold overlay arcs over exactly what the line beneath it arcs over.
+
+  `verticals` accumulates as the local passes draw, and lane buses push their
+  own segments as they go, so a second lane bus hops the first. Only the
   horizontal run is hopped — the short descents are left plain. The footer
   key that explained the old dashed line is gone: a hopped line that runs
   half the chart explains itself.
