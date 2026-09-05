@@ -15,8 +15,17 @@ The HTML embeds no family data at all — see Where the sheet id lives.
 ## Where the sheet id lives
 
 **In the URL, not in the file.** `index.html?sheet=<id>` — or paste the whole
-Google Sheets URL as the parameter, the id gets extracted. Anything outside
-`[A-Za-z0-9_-]` is stripped before the id reaches the gviz URL.
+Google Sheets URL, into the parameter or the setup form; `sheetId()` reduces
+either to the id, and anything outside `[A-Za-z0-9_-]` is stripped before it
+reaches the gviz URL.
+
+**The address is trimmed to the id in two places**, because the link is the
+thing people forward. The setup form reduces the paste before it navigates, so
+submitting a full Sheets URL still produces `?sheet=<id>` rather than a
+percent-encoded mess; and a page opened with an untrimmed parameter — a link
+made before this existed — rewrites its own address bar to the short form with
+`replaceState`, keeping the hash. Neither reloads. A paste that reduces to
+nothing gets a hint under the form instead of a navigation to `?sheet=`.
 
 With no parameter the page loads `DEMO_SHEET`: the invented family from
 `demo-family.csv`, in a public sheet. An empty form explains nothing about what

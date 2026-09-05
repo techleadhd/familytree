@@ -291,12 +291,24 @@ footer{
    either the id or the whole Google Sheets URL. With no parameter you get the
    demo family, and the footer offers the setup form.
 ------------------------------------------------------------------- */
-function sheetFromURL(){
-  const raw=(new URLSearchParams(location.search).get("sheet")||"").trim();
-  const m=raw.match(/\/spreadsheets\/d\/([A-Za-z0-9_-]+)/);
-  return (m?m[1]:raw).replace(/[^A-Za-z0-9_-]/g,"");
+/* Whatever a family member manages to paste — the whole address bar, an
+   /edit#gid= link, or the bare id — comes back as the id alone. */
+function sheetId(raw){
+  const m=(raw||"").trim().match(/\/spreadsheets\/d\/([A-Za-z0-9_-]+)/);
+  return (m?m[1]:raw||"").trim().replace(/[^A-Za-z0-9_-]/g,"");
 }
-const SHEET_ID   = sheetFromURL();
+const SHEET_ID   = sheetId(new URLSearchParams(location.search).get("sheet")||"");
+/* A link someone made before this page trimmed the input carries the entire
+   percent-encoded Sheets URL in the parameter. Rewrite the address bar to the
+   id alone, so whatever they copy next is the short form. Same page, same
+   sheet, no reload — and replaceState throws on some file:// origins, where
+   there is no address worth tidying anyway. */
+(function tidyURL(){
+  const raw=new URLSearchParams(location.search).get("sheet");
+  if(!SHEET_ID||raw===SHEET_ID) return;
+  try{ history.replaceState(null,"",
+    location.pathname+"?sheet="+SHEET_ID+location.hash); }catch(_){}
+})();
 /* With no ?sheet= the page opens on an invented family in a public sheet,
    because an empty form explains nothing about what this is. It is a demo, not
    a fallback: a named sheet always wins, and a sheet that fails to load still
@@ -1489,8 +1501,16 @@ document.addEventListener("keydown",e=>{
 });
 document.getElementById("setupForm").addEventListener("submit",e=>{
   e.preventDefault();
-  const id=document.getElementById("sheetInput").value.trim();
-  if(id) location.search="?sheet="+encodeURIComponent(id);
+  const inp=document.getElementById("sheetInput");
+  /* Reduce the paste to the id before navigating, so the address people end up
+     sharing is `?sheet=<id>` rather than a percent-encoded Sheets URL. */
+  const id=sheetId(inp.value);
+  if(!id){
+    document.getElementById("setupHint").textContent=
+      "That doesn't look like a Google Sheet link or id.";
+    inp.focus(); inp.select(); return;
+  }
+  location.search="?sheet="+id;
 });
 load();
 </script>
