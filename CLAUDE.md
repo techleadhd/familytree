@@ -526,11 +526,21 @@ Three more things a phone needs:
 - **`startView()`** opens on the eldest, leftmost person at k=0.8 rather than
   on the fitted whole, because the middle of the top row is usually empty air
   between two couples. A permalink still wins — `openHash()` runs after it.
-- **The panel becomes a bottom sheet** at 52vh, and `keepVisible()` lifts a
-  newly selected person into the strip above it, but only when they are
+- **The panel becomes a bottom sheet** at exactly `50dvh`, and `keepVisible()`
+  lifts a newly selected person into the strip above it, but only when they are
   actually covered: a chart that jumps on every tap is worse than one that
-  occasionally has to. 52vh is not arbitrary — the strip left over still has to
+  occasionally has to. Half is not arbitrary — the strip left over still has to
   hold a full-detail box. `focusOn()` centres in that same strip.
+- **The frame gives the chart everything it isn't using.** `100dvh` rather than
+  `100%`, so the page grows as the address bar slides away; the header is one
+  row on a phone instead of two; the pan/zoom tip is hidden, since a phone
+  teaches itself in one gesture, and the footer disappears entirely once that
+  leaves nothing in it but an empty bar. Between them that is ~70px of chart on
+  a 390x844 screen.
+- **The panel scrolls in `#panelBody`, not in the panel.** The close button is
+  positioned against the panel, so with the scroll one level in it stays where
+  it was put instead of leaving with the content — and it carries the card's
+  own background, or names slide through the ×.
 
 The breakpoint is **860px in two places** — the media query and `NARROW()` —
 and they have to stay in step, because the script measures the sheet's height to

@@ -19,6 +19,9 @@
 }
 *{box-sizing:border-box}
 html,body{margin:0;height:100%;overscroll-behavior:none;-webkit-text-size-adjust:100%}
+/* dvh follows the address bar as it slides away, so the chart gets the whole
+   screen instead of the smallest the viewport is ever going to be */
+@supports (height:100dvh){ html,body{height:100dvh} }
 body{
   background:var(--paper); color:var(--ink);
   font-family:"Newsreader",Georgia,serif; font-weight:400;
@@ -109,9 +112,12 @@ button.quiet[aria-pressed="true"]:hover{color:var(--card)}
 aside{
   position:absolute; top:0; right:0; bottom:0; width:23rem; max-width:88vw;
   background:var(--card); border-left:1px solid var(--hair);
-  padding:1.4rem 1.5rem; overflow-y:auto;
+  display:flex; flex-direction:column; overflow:hidden;
   transform:translateX(100%); transition:transform .22s ease;
 }
+/* The scroll lives here rather than on the panel, so the close button — which
+   is positioned against the panel — stays where it was put. */
+#panelBody{flex:1; overflow-y:auto; padding:1.4rem 1.5rem}
 aside.open{transform:none}
 @media (prefers-reduced-motion:reduce){aside{transition:none}}
 
@@ -125,23 +131,28 @@ aside.open{transform:none}
    measures the sheet to keep a selected person clear of it, and would measure
    a side panel that isn't there if the two disagreed. */
 @media (max-width:860px){
-  header{gap:.5rem .8rem; padding:.6rem .8rem; flex-wrap:wrap; align-items:center}
-  h1{font-size:1rem}
-  .tools{width:100%; margin-left:0; gap:.4rem}
-  input[type=search]{flex:1; width:auto; font-size:16px}
-  button{font-size:.9rem; padding:.42rem .7rem}
+  /* one row: on a phone the chart needs every pixel the frame isn't using */
+  header{gap:.5rem; padding:.5rem .7rem; flex-wrap:nowrap; align-items:center}
+  h1{font-size:.95rem; flex:none; white-space:nowrap}
+  .tools{width:auto; margin-left:auto; gap:.4rem; flex:1; min-width:0}
+  input[type=search]{flex:1; width:auto; min-width:0; font-size:16px}
+  button{font-size:.88rem; padding:.4rem .6rem; white-space:nowrap}
   aside{
     top:auto; left:0; right:0; bottom:0; width:auto; max-width:none;
-    /* 52vh, not more: the strip left above the sheet still has to hold a
-       full-detail box, or selecting someone hides them */
-    height:auto; max-height:52vh; padding:1.1rem 1.1rem 1.5rem;
+    /* half the screen: enough for the panel to be worth opening, and it still
+       leaves the strip above it deep enough to hold a full box */
+    height:50dvh; max-height:50dvh;
     border-left:none; border-top:1px solid var(--hair);
     transform:translateY(100%);
   }
+  #panelBody{padding:1.1rem 1.1rem 1.5rem}
   aside.open{transform:none}
-  aside .close{top:.6rem; right:.7rem; font-size:1.5rem; padding:.3rem .5rem}
+  aside .close{top:.5rem; right:.6rem; font-size:1.5rem; padding:.3rem .5rem}
   #pPhoto{max-width:8rem}
-  footer{padding:.45rem .8rem; gap:.8rem; font-size:.76rem}
+  /* the pan/zoom tip is desktop advice; a phone teaches itself in one gesture */
+  #tip{display:none}
+  footer{padding:.35rem .8rem; gap:.8rem; font-size:.76rem}
+  footer.bare{display:none}          /* nothing left in it once the tip is gone */
   #issues{left:.6rem; right:.6rem; bottom:.6rem; max-width:none}
   #setup{padding:1.2rem 1.2rem}
 }
@@ -158,7 +169,11 @@ dt{color:var(--muted); font-style:italic; margin-top:.7rem}
 dd{margin:.05rem 0 0}
 dd a{color:var(--pine); text-decoration:none; border-bottom:1px solid var(--hair); cursor:pointer}
 dd a:hover{border-color:var(--pine)}
-.close{position:absolute; top:1rem; right:1.1rem; border:none; background:none; font-size:1.3rem; line-height:1; padding:.2rem .4rem; color:var(--muted)}
+/* Fixed to the panel while its body scrolls under it, so it needs the card's
+   own background — otherwise names slide through the ×. */
+.close{position:absolute; z-index:2; top:1rem; right:1.1rem; border:none;
+  background:var(--card); border-radius:3px; font-size:1.3rem; line-height:1;
+  padding:.2rem .45rem; color:var(--muted)}
 footer{
   flex:none; display:flex; gap:1.4rem; align-items:center; flex-wrap:wrap;
   padding:.55rem 1.25rem; border-top:1px solid var(--hair);
@@ -189,7 +204,7 @@ footer{
   border-radius:2px; padding:.36rem .5rem;
 }
 #setupForm input:focus-visible{outline:2px solid var(--pine); outline-offset:1px}
-#setup .close{top:.7rem; right:.8rem; font-size:1.15rem}
+#setup .close{top:.7rem; right:.8rem; font-size:1.15rem; background:none}
 #setup .close[hidden]{display:none}
 .linky{
   font-family:inherit; font-size:inherit; color:var(--pine); background:none;
@@ -217,6 +232,7 @@ footer{
   <svg id="stage" role="img" aria-label="Family chart"></svg>
   <aside id="panel" aria-live="polite">
     <button class="close" id="closePanel" aria-label="Close">&times;</button>
+    <div id="panelBody">
     <img id="pPhoto" alt="" hidden>
     <h2 id="pName"></h2>
     <p class="sub" id="pSub"></p>
@@ -227,6 +243,7 @@ footer{
     </p>
     <p class="relout" id="relOut" hidden></p>
     <dl id="pRel"></dl>
+    </div>
   </aside>
   <div id="setup" hidden>
     <button class="close" id="setupClose" aria-label="Close" hidden>&times;</button>
@@ -248,7 +265,7 @@ footer{
 </main>
 
 <footer>
-  <span>Drag to pan, pinch or scroll to zoom, tap anyone to read more.</span>
+  <span id="tip">Drag to pan, pinch or scroll to zoom, tap anyone to read more.</span>
   <span id="demoNote" hidden>This is a made-up family.
     <button class="linky" id="useOwn">Open your own sheet</button></span>
 </footer>
@@ -1664,6 +1681,9 @@ async function load(){
     catch(e){ rows=await loadTab(id,""); }
     buildModel(rows); render(); fit(); startView(); openHash();
     document.getElementById("demoNote").hidden=!isDemo;
+    /* with the tip hidden on a phone, a footer with no demo note in it is an
+       empty bar taking a row of the chart's height */
+    document.querySelector("footer").classList.toggle("bare",!isDemo);
   }catch(err){
     /* There is no built-in family to fall back on, which is the point: a
        stale tree pretending to be the current one is worse than an error. */
