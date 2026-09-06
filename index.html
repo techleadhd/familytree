@@ -477,6 +477,9 @@ const key   = s => (s||"").trim().replace(/\s+/g," ").toLowerCase();
 const names = s => (s||"").split(",").map(x=>x.trim()).filter(Boolean);
 const coupleId = list => list.map(key).sort().join(", ");
 
+/* the other side of a union, or "" for a lone parent */
+const partnerIn = (u,id) => !u ? "" : (u.a===id ? u.b : u.a);
+
 function buildModel(rows){
   P=new Map(); U=new Map(); kidsOf=new Map(); issues=[]; let seq=0;
 
@@ -555,12 +558,21 @@ function buildModel(rows){
   for(const p of P.values())
     if(p.parentUnion&&kidsOf.has(p.parentUnion)) kidsOf.get(p.parentUnion).push(p.id);
 
-  /* No marriage years any more, so a person's unions keep sheet order and
-     children are ordered by birth year. */
+  /* Row order is the priority order, everywhere the layout has a choice.
+     A person's row number is their priority — lower row, higher priority,
+     further left — and `p.row` is the only thing consulted. Birth years are
+     not: they are often missing, often wrong, and gave whoever edits the
+     sheet no way to fix an order they didn't like. Moving a row is something
+     anyone can do and see the result of. */
+  const byRow=(x,y)=>P.get(x).row-P.get(y).row;
+  /* A person's marriages read in the order the sheet lists the spouses. */
   for(const p of P.values())
-    p.unions.sort((x,y)=>U.get(x).seq-U.get(y).seq);
-  for(const list of kidsOf.values())
-    list.sort((x,y)=>(+P.get(x).birth||9999)-(+P.get(y).birth||9999));
+    p.unions.sort((x,y)=>{
+      const pa=partnerIn(U.get(x),p.id), pb=partnerIn(U.get(y),p.id);
+      if(pa&&pb&&P.has(pa)&&P.has(pb)) return byRow(pa,pb);
+      return U.get(x).seq-U.get(y).seq;
+    });
+  for(const list of kidsOf.values()) list.sort(byRow);
 
   hasPhotos=[...P.values()].some(p=>p.photo);
   assignGenerations();
@@ -612,27 +624,28 @@ function buildChains(){
       const c=stack.pop(); comp.push(c);
       for(const n of adj.get(c)) if(!seen.has(n)){seen.add(n);stack.push(n);}
     }
-    const members=orderChain(comp,adj);
+    const members=orderChain(comp);
     const ci=chains.length;
     chains.push({i:ci,members,unions:chainUnions(members)});
     for(const m of members) chainOf.set(m,ci);
   }
 }
-function orderChain(comp,adj){
-  if(comp.length<3)
-    return comp.slice().sort((a,b)=>(+P.get(a).birth||0)-(+P.get(b).birth||0));
-  const ends=comp.filter(c=>adj.get(c).filter(n=>comp.includes(n)).length===1);
-  const seqAt=id=>Math.min(...P.get(id).unions.map(u=>U.get(u).seq));
-  const start=ends.length?ends.slice().sort((x,y)=>seqAt(x)-seqAt(y))[0]:comp[0];
-  const out=[start], used=new Set([start]);
-  while(out.length<comp.length){
-    const last=out[out.length-1];
-    const next=adj.get(last).find(n=>comp.includes(n)&&!used.has(n));
-    if(!next) break;
-    out.push(next); used.add(next);
-  }
-  for(const c of comp) if(!used.has(c)) out.push(c);
-  return out;
+/* Who stands where inside a chain: row order, and nothing else.
+
+   This used to walk the marriage graph from one end, which kept every
+   couple side by side but meant the sheet had no say — the shape of the
+   marriages decided, and two people who had never met could end up between
+   a husband and a wife. Sorting on the row instead means the sheet always
+   decides, including the case that motivated it: a woman with three
+   husbands listed above her comes out
+   [husband 1][husband 2][husband 3][wife], which no walk can produce.
+
+   The price is that a bar between partners who are no longer adjacent has
+   to dip under the row to reach across whoever the sheet put between them.
+   That machinery already exists for exactly this, and a dip is a fair trade
+   for an order somebody can predict and change. */
+function orderChain(comp){
+  return comp.slice().sort((a,b)=>P.get(a).row-P.get(b).row);
 }
 function chainUnions(members){
   const out=[], set=new Set();
@@ -767,6 +780,77 @@ function layout(){
     }
   }
 
+  /* How much a union's connector matters: everyone it touches. A couple with
+     two children outranks a lone parent with one, which is what decides who
+     gets the straight line when two of them want the same space. */
+  const reach=(u,nKids)=>[u.a,u.b].filter(id=>P.has(id)&&P.get(id).x!=null).length+nKids;
+
+  /* The winner's position, not the average of everyone's. Most people behind
+     it wins; among equals the *middle* one wins, never an end. That second
+     rule is not a tidiness preference — for two competitors any choice costs
+     the same total, but for three, zeroing the middle is the least total bend
+     there is, and zeroing an end is the most. Picking leftmost cost the
+     three-husbands chart 105px for nothing. */
+  const middling=xs=>xs.slice().sort((a,b)=>a-b)[(xs.length-1)>>1];
+  function pick(aims){
+    const top=Math.max(...aims.map(a=>a.pull));
+    return middling(aims.filter(a=>a.pull===top).map(a=>a.at));
+  }
+
+  /* Slide each maximal run of chains that the fit pressed together, so that
+     the most-connected member of the run sits exactly on its target. Clamped
+     by the free space on either side of the run, so a run can never be shoved
+     into its neighbours. */
+  /* A chain can straddle two generations: marry someone a generation below you
+     and the pair is one rigid unit with a foot in each row. Such a chain is
+     fitted with the higher of the two rows, but its lower member is a box in
+     the row beneath — a row that was fitted earlier and is treated from here
+     on as fixed. Slide the run and that box moves too, invalidating the very
+     child positions the targets were measured from: on one test chart the
+     couple below chased its own child leftwards and ended up further out than
+     it began. Leave those runs where the fit put them. */
+  const straddles=ci=>{
+    const gs=chains[ci].members.map(m=>P.get(m)).filter(p=>p&&p.x!=null).map(p=>p.gen);
+    return gs.length>1&&Math.min(...gs)!==Math.max(...gs);
+  };
+  function straightenRuns(list,fitted,want,pull){
+    let i=0;
+    while(i<list.length){
+      let j=i;
+      while(j+1<list.length&&
+            fitted[j+1]-fitted[j]<=chainW(list[j])+SIB_GAP+0.5) j++;
+      if(j>i&&!list.slice(i,j+1).some(straddles)){
+        let top=0;
+        for(let k=i;k<=j;k++) top=Math.max(top,pull[k]);
+        if(top>0){
+          const shifts=[];
+          for(let k=i;k<=j;k++) if(pull[k]===top) shifts.push(want[k]-fitted[k]);
+          let d=middling(shifts);
+          const before=i>0?fitted[i]-(fitted[i-1]+chainW(list[i-1])+SIB_GAP):Infinity;
+          const after=j+1<list.length?fitted[j+1]-(fitted[j]+chainW(list[j])+SIB_GAP):Infinity;
+          d=Math.max(-before,Math.min(after,d));
+          /* Only if it is free. Concentrating a run costs nothing when the
+             shift can be taken in full — for two competitors it is exactly a
+             wash, and for three the middle one is the cheapest place to put
+             the zero. But a run clamped by its neighbours takes only part of
+             the shift, and a partial move can end up worse than the even
+             split it replaced: everybody bent, and still nobody straight.
+             Measure the run both ways and keep the better. */
+          if(Math.abs(d)>0.5){
+            let was=0, now=0;
+            for(let k=i;k<=j;k++){
+              if(pull[k]<=0) continue;
+              was+=Math.abs(want[k]-fitted[k]);
+              now+=Math.abs(want[k]-(fitted[k]+d));
+            }
+            if(now<=was+0.5) for(let k=i;k<=j;k++) fitted[k]+=d;
+          }
+        }
+      }
+      i=j+1;
+    }
+  }
+
   /* Least-squares fit of a row of chains to where each wants to be, keeping
      their order and their clearances — pool adjacent violators, exact, one
      pass. Same machine as fitGroups, over a whole generation. */
@@ -828,16 +912,30 @@ function layout(){
     for(const g of [...byGen.keys()].sort((a,b)=>b-a)){
       const list=byGen.get(g);
       list.sort((a,b)=>leftOf(a)-leftOf(b));
-      const want=[], weight=[];
+      const want=[], weight=[], pull=[];
       for(const ci of list){
         const aims=[];
         for(const uid of chains[ci].unions){
           const kids=(kidsOf.get(uid)||[]).map(k=>P.get(k)).filter(k=>k&&k.x!=null);
           if(!kids.length) continue;
           const cs=kids.map(k=>k.x+BOX_W/2);
-          aims.push((Math.min(...cs)+Math.max(...cs))/2-dropOffset(ci,U.get(uid)));
+          const u=U.get(uid);
+          aims.push({at:(Math.min(...cs)+Math.max(...cs))/2-dropOffset(ci,u),
+                     pull:reach(u,kids.length)});
         }
-        want.push(aims.length?aims.reduce((a,b)=>a+b,0)/aims.length:leftOf(ci));
+        /* One chain, one place to stand — but a person with two marriages has
+           two drops wanting two different places for it. Averaging gives both
+           of them half the error, which is the worse of both worlds: two lines
+           that each bend a little read as two mistakes, where one straight
+           line and one frank detour reads as one line being routed. So the
+           bigger union takes the chain's position outright and the smaller one
+           takes the whole bend. Same total error either way — for two, exactly
+           the same — but spent where it can be seen for what it is. */
+        want.push(aims.length?pick(aims):leftOf(ci));
+        /* what this chain's biggest connector is worth, for deciding who wins
+           a run — not the same as its vote in the fit below, which counts
+           broods rather than people */
+        pull.push(aims.length?Math.max(...aims.map(a=>a.pull)):0);
         /* One vote per brood, and almost none for a chain with no children.
            A childless couple has no opinion about where it stands, but with
            an equal vote it becomes an anchor: it asks to stay exactly where
@@ -849,6 +947,13 @@ function layout(){
         weight.push(aims.length||0.02);
       }
       const fitted=fitRow(list,want,weight);
+      /* Where the fit had to pool neighbours — chains it pushed hard against
+         each other because their wishes overlapped — it left every one of them
+         the same share of the disagreement. Same argument as above, one level
+         out: slide the whole rigid run so its most-connected member lands on
+         its own target, as far as the chains either side of the run allow.
+         The run moves as a unit, so nothing inside it can collide. */
+      straightenRuns(list,fitted,want,pull);
       list.forEach((ci,i)=>{
         let cx=fitted[i];
         for(const m of chains[ci].members){
@@ -992,23 +1097,6 @@ function between(a,b){
     if(q!==a&&q!==b&&q.x!=null&&q.gen===a.gen&&q.x+BOX_W>lo+1&&q.x<hi-1) return true;
   return false;
 }
-/* The empty corridor between two boxes in the row that is nearest the middle of
-   the span. A lifted bar's children have to drop through the row to reach their
-   bus, and this is where they can do it without crossing anyone. */
-function corridor(a,b){
-  const lo=Math.min(a.x,b.x)+BOX_W, hi=Math.max(a.x,b.x), mid=(lo+hi)/2;
-  const row=[...P.values()]
-    .filter(q=>q.x!=null&&q.gen===a.gen&&q.x+BOX_W>lo-1&&q.x<hi+1)
-    .sort((p,q)=>p.x-q.x);
-  let best=mid, bd=Infinity;
-  for(let i=0;i<row.length-1;i++){
-    const g0=row[i].x+BOX_W, g1=row[i+1].x;
-    if(g1-g0<10) continue;
-    const c=(g0+g1)/2, d=Math.abs(c-mid);
-    if(d<bd){ bd=d; best=c; }
-  }
-  return best;
-}
 
 function inlineCross(uid,kid){
   const u=U.get(uid), k=P.get(kid);
@@ -1099,8 +1187,17 @@ function render(){
 
     if(a&&b&&a.x!=null&&b.x!=null){
       const left=Math.min(a.x,b.x), right=Math.max(a.x,b.x);
-      rowY=Math.min(a.y,b.y);
-      if(between(a,b)){
+      const leftP=a.x<=b.x?a:b, rightP=a.x<=b.x?b:a;
+      /* The lower of the two rows, not the upper. Partners are nearly always
+         on the same row and then it makes no difference, but an aunt who
+         married a man a generation below her is a real thing, and hanging
+         their bus under her row put it *above* him — so the stub down to
+         their own child ran straight through his box. Everything this union
+         draws below itself has to clear both of them. */
+      rowY=Math.max(a.y,b.y);
+      /* Partners on different rows can never be side by side, whatever the
+         gap between their boxes says. */
+      if(a.y!==b.y||between(a,b)){
         /* Not side by side, so the bar cannot run at bar height without going
            straight through whoever is in between — and neither can a drop taken
            from the middle of it. Dip under the row instead: down from each
@@ -1110,7 +1207,11 @@ function render(){
         barY=laneY(rowY,dipLane);
         firstLane=dipLane+1;            /* the children hang below their own bar */
         midX=(left+right+BOX_W)/2;
-        geom.dipSpan={x1:left+BOX_W-DIP_IN,x2:right+DIP_IN,top:rowY+BOX_H};
+        /* One leg per partner, each starting at that partner's own box
+           bottom — the same height when they share a row, a longer reach
+           down for whichever of them sits higher. */
+        geom.dipSpan={x1:left+BOX_W-DIP_IN,x2:right+DIP_IN,
+                      t1:leftP.y+BOX_H,t2:rightP.y+BOX_H};
         dips.push({uid:u.id,...geom.dipSpan,y:barY});
         runs.push({x0:left+BOX_W-DIP_IN,x1:right+DIP_IN,y:barY,dipOf:u.id});
       }else{
@@ -1185,10 +1286,10 @@ function render(){
   /* A dipped bar's two legs. The bar itself is a run like any other. */
   for(const d of dips){
     const g=linkGeom.get(d.uid);
-    for(const x of [d.x1,d.x2]){
-      const leg=el("line",{x1:x,y1:d.top,x2:x,y2:d.y,class:"link"});
+    for(const [x,top] of [[d.x1,d.t1],[d.x2,d.t2]]){
+      const leg=el("line",{x1:x,y1:top,x2:x,y2:d.y,class:"link"});
       lines.appendChild(leg);
-      verticals.push({x,y1:d.top,y2:d.y});
+      verticals.push({x,y1:top,y2:d.y});
       if(g) g.dipParts.push(leg);
     }
   }
@@ -1493,9 +1594,12 @@ function paintLineage(){
       litLayer.appendChild(el("path",{class:"lit-link",
         d:`M${keptOnLeft?g.bar.x1:g.bar.x2} ${g.barY}H${g.midX}`}));
     else if(g.dipSpan){
+      /* the leg on the kept parent's side, from that parent's own box
+         bottom — which is not the other's when the two sit a row apart */
       const legX=keptOnLeft?g.dipSpan.x1:g.dipSpan.x2;
+      const legTop=keptOnLeft?g.dipSpan.t1:g.dipSpan.t2;
       litLayer.appendChild(el("path",{class:"lit-link",
-        d:`M${legX} ${g.dipSpan.top}V${g.barY}`+hops(legX,g.midX,g.barY,lastVerticals)}));
+        d:`M${legX} ${legTop}V${g.barY}`+hops(legX,g.midX,g.barY,lastVerticals)}));
     }
   }
   for(const {uid,kid} of edges){

@@ -111,19 +111,165 @@ works until the first remarriage.
    own get pinned to their spouse's generation. Only married-ins get pinned, never blood relatives,
    so a cousin marriage can't distort a lineage.
 
-2. **Chains** — connected components of the spouse graph, ordered by walking
-   from the endpoint whose union appears first in the sheet. (This used to key
-   off marriage years, which no longer exist; sheet order is the replacement,
-   which means reordering rows is how you nudge a chain.) Produces
-   `Susan — Henry — Patricia` rather than an arbitrary order.
+2. **Chains** — connected components of the spouse graph, **ordered by row**.
+   Nothing else: not birth year, not the shape of the marriages.
 
-3. **Horizontal (x)** — three passes. `claim` walks down from the root chains
-   building a tree and recording which chain owns which child. `measure` computes
-   subtree widths bottom-up. `place` assigns x top-down, centering each couple
-   over the span of their children. Children before parents is what makes couples
-   land centered above their kids.
+   This used to walk the marriage graph from one end, which kept every couple
+   side by side but meant the sheet had no say — the marriages decided, and
+   two people who had never met could end up standing between a husband and
+   a wife. Row order means the sheet always decides, including the case that
+   motivated the change: a woman with three husbands listed above her comes
+   out `[husband 1][husband 2][husband 3][wife]`, which no walk can produce.
 
-4. **Connectors** — four primitives, all axis-aligned: a marriage bar between
+   The price is that a bar between partners who are no longer adjacent has to
+   dip under the row to reach across whoever the sheet put between them. That
+   machinery already existed for exactly this, and a dip is a fair trade for
+   an order somebody can predict and change.
+
+3. **Order is priority, priority is the row, and the top generation goes
+   first.** `p.row` is a person's position in the sheet — lower row, higher
+   priority, further left — and it is the only thing consulted. Birth years
+   decide nothing; `birth` is read only to print dates.
+
+   Generation 1 is ordered by row outright. Generation *g* is ordered by row
+   **only where that does not fight generation g-1**: the primary key is
+   where your parents stand, and your own row breaks the tie. That "only
+   where possible" clause is not a softening, it is what makes the rule
+   satisfiable at all — see the note below.
+
+   Two rules outrank the row, and both are what make a family tree readable:
+   **partners stay side by side** (a chain is placed as a unit), and
+   **children stay under their parents**. So a generation reads as families
+   in row order, with people in row order inside each family — not as one
+   flat sort of everyone in that generation.
+
+   Measured against that spec, written out as an independent checker:
+   **63 of 65 generations across 19 fixtures match exactly.** Both exceptions
+   are cousin marriages, and they are exceptions because the rule does not
+   say which parents win when a chain hangs from two families at once. The
+   code uses whichever branch reached the chain first in `claim`'s walk. If
+   that is ever pinned down, the natural completion is *the earlier-listed
+   spouse's parents win* — the same lower-row-first principle, one level
+   down. It affects 4 chains in the demo, 0 in any chart without cousin
+   marriage.
+
+   **Why the row cannot simply win.** Sorting every generation by its own row
+   and also centring parents over children is not a hard problem, it is an
+   impossible one whenever a sheet lists generations in disagreeing orders.
+   Three families, gen 1 listed Aqin, LiZhu, QiuHong, but the children listed
+   QiuHong's first:
+
+       x(Aqin) < x(LiZhu) < x(QiuHong)                        row order, gen 1
+       centre(QH kids) < centre(Aqin kids) < centre(LiZhu kids)  row order, gen 2
+
+   Centring says each parent sits on their own children's centre; substitute
+   and you get `x(QiuHong) < x(Aqin) < x(LiZhu)`, contradicting the first
+   line. This was built and measured: it produced an 890px bus across the
+   chart and dead space between two siblings. Reverted.
+
+   How often it bites, over 366 parent pairs: **zero irreconcilable pairs on
+   every naturally-authored fixture** — the demo (31 pairs), the 70-person
+   chart (72), the 107-person chart (142), and every hand-written shape.
+   Conflicts appear only in sheets deliberately written inconsistently, and
+   in the random generators, which emit children in arbitrary order and hit
+   52% and 65%. And wherever a sheet is self-consistent, this code already
+   puts every chain in exact row order. The two approaches only diverge where
+   the strict one is infeasible anyway.
+
+   A worthwhile future feature: detect those pairs and name them in the
+   validator — "Aqin's children are listed after QiuHong's, but Aqin is
+   listed first" — which turns an unfixable layout problem into a sheet the
+   family can fix, after which row order is exact by construction.
+
+4. **Horizontal (x)** — `claim`, `measure`, `place`, then `settle`.
+
+   `claim` walks down from the root chains building a spanning tree, and
+   records as a `crossLink` every child it could not take because another
+   branch reached them first. `measure` sizes the tree bottom-up, `place`
+   positions it top-down, `settle` repairs what a tree cannot express.
+
+   **Each union is centred on its own children — not the chain on all of
+   them.** Those are the same thing only when a chain is one couple with one
+   marriage. Give someone a second marriage and there are two drops but still
+   one chain centre; make a chain three people and the drop sits between two
+   of them, nowhere near the middle. Both used to draw as a long sideways
+   reach from a drop to a brood centred on something else. So `measure` gives
+   each node a width **plus an `anchor`** — how far into that width the
+   chain's own left edge sits — because a brood centred on a drop near one
+   end of a long chain hangs out past it, and a plain bounding box from the
+   chain's left edge cannot say so.
+
+   A brood is measured to **the children's own boxes**, never to their
+   subtrees or their spouses': the bus meets the children, and a child who
+   married drags a spouse into the subtree that is no part of what the drop
+   aims at.
+
+   **`fitGroups`** handles one person's several marriages, whose broods want
+   overlapping space. It slides them apart by the least that separates them —
+   pool adjacent violators, exact, one pass. This is the "where possible"
+   clause of rule 2, and the residuals it leaves are it working: Maria's two
+   broods are wider than the 182px between her drops, so they spread the
+   minimum and the difference has to go somewhere. Three marriages give three
+   drops 91px apart needing 196px, so the outer two move ±105.
+
+   **`settle`** is one pass upward, once every box has an x. A family tree is
+   not a tree: a child who marries into another family is placed once, in
+   whichever branch reached them first, so the *other* set of parents is left
+   centred on whichever children it happened to keep. Grace and Karl have
+   three; Nina and Owen married Whitfields and sit in the Whitfield block, so
+   the tree pass centred them over Sten alone, 1,286px from the middle of the
+   three. So each generation is re-fitted to where its unions' children
+   actually ended up — all of them, wherever they were placed.
+
+   Upward, because that leaves the row below already final: fitting a row
+   never moves anything it was measured against, so one pass is the whole of
+   it and nothing iterates. A chain moves as a unit, so partners stay side by
+   side. A chain with no children asks to stay where it is and is given almost
+   no weight — with an equal vote a childless in-law becomes an anchor, and
+   the fit splits the difference between it and a neighbour reaching for three
+   children of their own. Its gap rule is `SIB_GAP` for every pair, not the
+   wider `GROUP_GAP` that `measure` gives a stranger: the separation between
+   families is already in the subtree widths, and asking for it twice only
+   lets this pass shove apart a row it was meant to leave alone. Its one hard
+   constraint is that boxes must not touch.
+
+   **Where two connectors want the same space, one of them gets it.** Two
+   drops that cannot both be straight used to take half the error each, which
+   is the worse of both worlds: two lines each bent a little read as two
+   mistakes, where one straight line and one frank detour reads as a single
+   line being routed round something. So the error is concentrated rather than
+   shared. `reach` scores a union by how many people its connector touches —
+   partners plus children — and the highest score takes the position outright.
+   This happens at two levels. `pick` settles it inside one chain, where a
+   person's several marriages give one chain several targets: the biggest
+   union wins and the rest bend. `straightenRuns` settles it between chains,
+   after the fit has pressed a group of neighbours together at minimum
+   separation: the run is already rigid, so it slides as a unit until its
+   most-connected member sits on its own target, clamped by the free space on
+   either side.
+
+   Concentrating is free when the shift can be taken in full — for two
+   competitors it is exactly a wash, and for three, zeroing the *middle* one is
+   the least total bend there is while zeroing an end is the most, which is why
+   `middling` takes the median and never a leftmost. A run clamped by its
+   neighbours takes only part of the shift, though, and a partial move can end
+   worse than the even split it replaced: everybody bent and still nobody
+   straight. So each run is measured both ways and the better kept.
+
+   Two exclusions. A chain with no children has nothing to be straight about
+   and never wins. And a chain that straddles two generations — marry someone
+   a generation below you and the pair is one rigid unit with a foot in each
+   row — is fitted with the higher row while its lower member is a box in the
+   row beneath, a row already fitted and treated from here on as fixed. Slide
+   such a run and that box moves too, invalidating the child positions the
+   targets were measured from; on one test chart the couple below chased its
+   own child leftwards and finished further out than it started. Runs
+   containing one are left where the fit put them.
+
+   Layout is a single pass end to end — 0-3ms on every fixture, nothing
+   iterates, and it runs once, from `render()`, after the sheet loads.
+
+5. **Connectors** — four primitives, all axis-aligned: a marriage bar between
    partners, a drop line from its midpoint, a horizontal sibling bus, and short
    stubs down to each child. Everything a row hangs below itself lives on a
    **ladder of lanes** — `LANE0` (+22) and every `LANE_STEP` (24) below it — and
@@ -142,6 +288,18 @@ works until the first remarriage.
    it (`firstLane`); a bus with a far-flung child is simply wide, so it
    conflicts with everything and lands near the bottom of the ladder on its
    own.
+
+   **Partners on different rows always dip, and the dip hangs below the lower
+   of the two.** An aunt who married a man a generation below her is a real
+   thing, and `between()` only ever looked at one partner's own row, so such a
+   couple was drawn as though side by side: a flat bar at the upper row's
+   height, and a stub down to their own child running straight through the
+   lower partner's box. `rowY` is the *lower* row, so everything the union
+   hangs below itself clears both of them, and the dip carries a top per leg
+   (`t1`/`t2`) — each starting at that partner's own box bottom, the same
+   height when they share a row and a longer reach down for whichever sits
+   higher. `paintLineage` uses the same per-leg top, so the bold overlay
+   follows the line underneath it.
 
    **Verticals are drawn first and horizontals last**, so every horizontal can
    arc over every vertical it crosses — not just the long lane runs, which is
@@ -183,10 +341,13 @@ works until the first remarriage.
    straight through that person's box — with the children's drop, taken from
    the midpoint of the span, going through it too. `between()` detects it and
    the bar **dips under the row**: down from each partner's box bottom
-   (`DIP_IN` inside the inner edge), along `DIP_LANE`, hopping any stub it
-   passes, and back up into the other partner. This union's children then hang
-   from a bus `DIP_DROP` below that lane, clear of the +5 bus every other couple
-   in the row uses.
+   (`DIP_IN` inside the inner edge), along a lane it asks `laneFor()` for like
+   any other run, hopping any stub it passes, and back up into the other
+   partner. This union's children then hang from a bus one lane below that
+   (`firstLane`), so the bar and its own children never share a height. The dip
+   carries a top per leg (`t1`/`t2`), each starting at that partner's own box
+   bottom — the same height when they share a row, a longer reach down when
+   they don't.
 
    Under, not over. The first version went over the top and was wrong: every
    line above a row arrives from the parents, so a horizontal up there reads as
@@ -285,8 +446,8 @@ the person you clicked. Up stays unlimited, because a line of ancestors is
 finite and is the thing people came to see. On top
 of that, **everyone the selection keeps is drawn in bold** — pine connectors to
 every ancestor, sibling, partner and child, and a heavier pine
-border on those boxes (`.kin`, 1.75 against the selection's marine 2.75, so the
-person you clicked still leads). Bolding and dimming are the same set by
+border on those boxes (`.kin`, pine 1.75 against the selection's azure 4, so
+the person you clicked still leads). Bolding and dimming are the same set by
 construction: both come from `lineage()`, so a box can never be bright with a
 thin line into it, which is what the first version did — it bolded ancestors
 only, and a highlighted spouse or child hung off a hairline.
@@ -406,17 +567,20 @@ brick red, which claimed a second meaning the panel's sentence already carried.
   bus height reads as somebody else's bus. Currently two of these, one of them 2,232px long.
   Inherent to strict generational banding — the alternative is duplicating
   people, which is worse: one box per person is what makes selection, dimming
-  and the relationship finder unambiguous. `sort_order` to pin horizontal
-  order by hand would shorten them, and is still the planned mitigation.
+  and the relationship finder unambiguous. `sort_order` was once the planned
+  mitigation; it is closed, not pending — the row *is* the handle now, and a
+  second ordering column would give the sheet two ways to say one thing.
 
   They used to be dashed, which was the wrong fix for the wrong problem. The
   actual damage was that they ran at `barY + DROP` — exactly the height of
   every sibling bus in that generation — so a long line lay *on top of* two
   short ones and read as one continuous bus, quietly adopting someone into
-  the wrong family. Now they get `CROSS_LANE` (88px under the box, below both
-  the +5 and +56 bus heights, still 36px clear of the next generation),
-  staggered by `CROSS_STEP` per link per row so two of them can't overlap
-  each other either. With the collinearity gone they are drawn solid and hop
+  the wrong family. They have no lane of their own any more: a union with a
+  far-flung child asks `laneFor()` like everything else, and because its bus
+  is wide it conflicts with every short one and lands further down the ladder
+  by itself. That is the same mechanism that keeps one person's several
+  marriages apart, rather than a second set of constants doing the same job.
+  With the collinearity gone they are drawn solid and hop
   over the verticals they cross: `hops()` arcs over any vertical whose y-range
   spans the lane. Every real junction in this chart is a T, so a crossing was
   already distinguishable; the hop makes it unambiguous.
@@ -557,12 +721,16 @@ Newsreader as the single type family. Deliberately not the cream-and-terracotta
 default. Sex fills are muted (`#DAE6F0` / `#F2DEE5`) because saturated blue and
 pink fight the background.
 
-One accent does not belong to that palette: `--marine` (`#12557F`) outlines the
-selected person and the person being compared. Everything else the selection
-draws — the bold run up to the ancestors and siblings, their borders — is pine,
-and a pine box sitting inside a pine run at nearly the same weight is
-impossible to pick out. Marine is the answer to "which one did I click?", so it
-belongs to those two boxes only. Generation bands are tinted but unlabeled.
+Two accents do not belong to that palette. `--azure` (`#1478D4`) at 4px
+outlines the selected person; `--marine` (`#12557F`) at 2.25 outlines the
+person being compared. Everything else the selection draws — the bold run up
+to the ancestors and siblings, their borders — is pine, and a pine box sitting
+inside a pine run at nearly the same weight is impossible to pick out. Azure is
+the answer to "which one did I click?", so it belongs to that one box, and it
+is brighter and heavier than anything else on the chart on purpose: at the zoom
+where a whole family fits on screen a box is a thumbnail and a 2.75px stroke a
+hairline, which is what the first version of this was. Generation bands are
+tinted but unlabeled.
 
 ## The demo family
 
@@ -579,10 +747,10 @@ Testing) rather than at the real family.
 
 ## Open threads
 
-1. `sort_order` column to pin horizontal order and shorten the cross-links.
-2. Focus mode — click a person, show two generations up and down.
-3. Photos. A `photo` column of URLs or filenames; needs somewhere to host
-   them. See the note in Open threads below.
-3. Half-sibling cue on the chart itself; currently only visible in the panel.
-4. Measured text wrapping instead of character estimation.
-5. Decide the privacy posture before circulating the URL.
+1. Focus mode — click a person, show two generations up and down.
+2. Half-sibling cue on the chart itself; currently only visible in the panel.
+3. Measured text wrapping instead of character estimation.
+4. Decide the privacy posture before circulating the URL.
+
+`sort_order` is closed rather than pending: row order is the handle, and a
+second ordering column would only give the sheet two ways to say one thing.
