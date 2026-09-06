@@ -10,6 +10,10 @@
 <style>
 :root{
   --paper:#EDEEE9; --card:#FBFBF9; --ink:#1F2421; --muted:#6B7268;
+  /* the note under a name is the only thing on a card anyone reads twice, so
+     it sits between the name and the muted furniture rather than with the
+     furniture — dark enough to read at a glance, still clearly not the name */
+  --note:#3F4841;
   --rule:#9AA096; --hair:#C8CCC4; --pine:#2E6B4F; --brick:#A6564A;
   /* the selection reads against pine lineage, not with it. Two weights of
      the same idea: azure for the one box you clicked, marine for the quieter
@@ -67,19 +71,25 @@ button:focus-visible{outline:2px solid var(--pine); outline-offset:1px}
 #warn{color:var(--brick); font-size:.85rem; font-style:italic; cursor:pointer; background:none; border:none; padding:0}
 #warn[hidden]{display:none}
 main{flex:1; position:relative; overflow:hidden}
-#stage{width:100%; height:100%; display:block; cursor:grab}
+/* A drag on the chart is a pan, never a text selection. Without this, a pan
+   that wanders into the panel selects everything between where the mouse went
+   down and where it came up — the browser has no idea the gesture meant
+   something else. Saying it on the chart alone leaves the panel's own text
+   selectable, which is where anyone would actually want to copy from. */
+#stage{width:100%; height:100%; display:block; cursor:grab;
+       user-select:none; -webkit-user-select:none}
 #stage.drag{cursor:grabbing}
 .gen-band{fill:var(--band)}
 .box{stroke:var(--rule); stroke-width:.75}
 .box.m{fill:var(--male)}
 .box.f{fill:var(--female)}
 .box.u{fill:var(--nosex)}
-.nm{fill:var(--ink); font-size:13.5px; font-weight:500}
-.yr{fill:var(--muted); font-size:10.5px}
-.desc{fill:var(--muted); font-size:10.5px}
+.nm{fill:var(--ink); font-weight:500}   /* size set per name, shrunk to fit */
+.yr{fill:var(--muted); font-size:14px}
+.desc{fill:var(--note); font-size:18px}
 .avatar-blank{fill:var(--band)}
 .avatar-ring{fill:none; stroke:var(--rule); stroke-width:.75}
-.initials{fill:var(--muted); font-size:20px; text-anchor:middle}
+.initials{fill:var(--muted); text-anchor:middle}   /* size set with the circle */
 .divider{stroke:var(--rule); stroke-width:.5; opacity:.45}
 .link{stroke:var(--rule); stroke-width:1; fill:none}
 .link.cross{stroke:var(--rule)}
@@ -361,8 +371,11 @@ const gviz = (id, tab, cb) =>
   (tab?`&sheet=${encodeURIComponent(tab)}`:"");
 
 /* ---- geometry ---- */
-const BOX_W=152, PAIR_GAP=30, SIB_GAP=26, GROUP_GAP=44,
-      PAD=70, GUTTER=50, DESC_CHARS=27;
+/* SIDE_PAD is the margin the text keeps from the box edge — the rule and the
+   description both. Deliberately far tighter than the 32px the photo sits in:
+   a face wants air around it, a sentence wants the width. */
+const BOX_W=200, PAIR_GAP=30, SIB_GAP=26, GROUP_GAP=44,
+      PAD=70, GUTTER=50, SIDE_PAD=8;
 
 /* One box, one size. There used to be a second, shorter box that the zoom
    switched to, on the theory that ten lines of description are a grey smear
@@ -371,11 +384,50 @@ const BOX_W=152, PAIR_GAP=30, SIB_GAP=26, GROUP_GAP=44,
    being pinched or framed, two-pass measuring in every function that chooses a
    zoom, and a hysteresis band so the thing wouldn't flap on the way past. The
    box people zoom into is the box they see. */
-const BOX_BASE=176, GEN_BASE=330, DESC_LINES=10, PHOTO_R=32;
+const DESC_LINES=10, PHOTO_PAD=32, PHOTO_R=BOX_W/2-PHOTO_PAD;
+/* The rhythm below the photo, written as the gaps between the pieces rather
+   than as offsets from the top. Offsets meant every piece knew where the years
+   line sat whether or not the person had one, so a card with no dates carried
+   the empty slot anyway: a name, a hole, and then the description, which reads
+   as a gap somebody forgot rather than as a date nobody knows. Gaps let the
+   parts that are missing take up no room. */
+const NAME_Y=26,      /* box or photo edge, down to the name's baseline */
+      YEAR_GAP=20,    /* name baseline to the years, when there are years */
+      RULE_GAP=12,    /* last line above, down to the rule */
+      DESC_GAP=34,    /* last line above, down to the first description line */
+      DESC_STEP=20, FOOT=15;
+
+/* Where each piece of one person's box sits, and how tall that makes it. The
+   tallest answer over the whole family becomes BOX_BASE: one height for every
+   box, chosen by the family rather than by a constant that has to guess. */
+function boxRows(p,lines){
+  const r={name:NAME_Y};
+  let y=NAME_Y;
+  if(p.birth) y=r.year=y+YEAR_GAP;
+  if(lines){ r.rule=y+RULE_GAP; y=r.desc=y+DESC_GAP; y+=(lines-1)*DESC_STEP; }
+  r.height=y+FOOT;
+  return r;
+}
+const NAME_SIZE=20, NAME_MIN=14;
+/* What a row leaves below itself for the lane ladder and the stubs down to the
+   next one. Held constant as the box grows or shrinks, so the connectors never
+   have to be re-checked against a new box height. */
+const ROW_GAP=154;
 /* Room for a face at the top of a box, added only when the sheet actually has
    photos in it — until the first one is filled in, nobody pays for the empty
-   band. */
-const PHOTO_TOP=6;
+   band.
+
+   PHOTO_R is free to change: the band is added to BOX_H and GEN_H alike, so
+   the gap between rows stays GEN_BASE-BOX_BASE whatever the face measures and
+   the lane ladder never has to be re-checked. Everything else that scales with
+   it — the initials in a blank circle, the thumbnail width asked of Drive —
+   derives from it rather than repeating the number.
+
+   So is the inset around it. PHOTO_PAD is the margin, the same on all three
+   sides, and the radius is what the box has left over — which is the way round
+   that keeps them even by construction. Sizing the face first and hoping the
+   margins agree is how it ended up with 32px at the sides and 6 at the top. */
+const PHOTO_TOP=PHOTO_PAD;
 /* Everything a row hangs below itself lives on a ladder of lanes, and a bus
    takes the first lane where it doesn't run into another bus. Two buses at one
    height with overlapping spans read as a single line — which is how a person
@@ -403,12 +455,23 @@ const STUB_SNAP=8;
    bottom, runs along a lane of its own, and this union's children hang from a
    lane below that. */
 const DIP_IN=34;
-let hasPhotos=false;
-let BOX_H, GEN_H, DROP, PHOTO_BAND;
-/* The only thing that still varies is whether the sheet has photos in it, and
-   that can change once, when the rows arrive. */
+let hasPhotos=false, boxBase=null;
+let BOX_H, GEN_H, DROP, PHOTO_BAND, BOX_BASE, GEN_BASE;
+/* Two things vary, and both are settled once, when the rows arrive: whether
+   the sheet has photos in it, and how many lines of description the longest
+   entry actually needs.
+
+   The second is why a box used to be 176px tall before the photo band. That
+   was room for the DESC_LINES cap — ten lines — whether or not a single person
+   had written ten. A family whose notes run to one line each was paying 108px
+   of empty box apiece, which reads as a chart of tall blank cards rather than
+   of people. Measuring the family instead means the boxes fit their own
+   contents: ten lines still get ten if somebody writes them, and everyone else
+   gets a box that ends where the words do. */
 function setMetrics(){
   PHOTO_BAND=hasPhotos?PHOTO_TOP+PHOTO_R*2:0;
+  BOX_BASE=boxBase!=null?boxBase:NAME_Y+YEAR_GAP+DESC_GAP+(DESC_LINES-1)*DESC_STEP+FOOT;
+  GEN_BASE=BOX_BASE+ROW_GAP;
   BOX_H=BOX_BASE+PHOTO_BAND; GEN_H=GEN_BASE+PHOTO_BAND;
   DROP=BOX_H/2+LANE0;              /* a couple's bar to the first lane */
 }
@@ -447,7 +510,7 @@ const DRIVE_HOST=/(?:drive|docs)\.google\.com/i;
 const DRIVE_ID=/(?:\/d\/|[?&]id=|^)([A-Za-z0-9_-]{20,})/;
 /* One size for both the chart avatar and the panel, so the two share a cache
    entry and each face is fetched once. 640 is sized for the panel on a 2x
-   display, which leaves the 44px avatar with more pixels than it needs —
+   display, which leaves the chart avatar with more pixels than it needs —
    deliberately, since the avatar is what someone zooms in on. */
 const PHOTO_PX=640;
 function photoURL(raw){
@@ -465,22 +528,67 @@ const initials = name => (name||"").trim().split(/\s+/).slice(0,2)
   .map(w=>w[0]||"").join("").toUpperCase();
 
 /* ---- greedy word wrap, since SVG text does not wrap on its own ---- */
-function wrap(text,maxChars,maxLines){
+/* ---- measuring ----
+   The wrap used to count characters against a DESC_CHARS constant. A count is
+   not a width: it had to be re-tuned by hand every time the type or the box
+   changed — six times in one afternoon — and it had to be pessimistic enough
+   for the widest line it might ever meet, so every ordinary line stopped well
+   short of the edge it was allowed. The nominal margin was 14px and the
+   margin you actually saw was nearer 30.
+
+   So measure. One hidden text node, one measurement per distinct character the
+   family uses, cached — a hundred people cost about sixty measurements, and
+   Chinese, which no character count can approximate, comes out right for
+   free. */
+let ruler=null;
+const charW=new Map();
+function rulerNode(){
+  if(ruler&&ruler.isConnected) return ruler;
+  const box=document.createElementNS("http://www.w3.org/2000/svg","svg");
+  box.setAttribute("aria-hidden","true");
+  box.style.cssText="position:absolute;left:-9999px;top:0;width:10px;height:10px";
+  ruler=el("text",{class:"desc"});
+  box.appendChild(ruler); document.body.appendChild(box);
+  return ruler;
+}
+function charWidth(ch){
+  let w=charW.get(ch);
+  if(w!=null) return w;
+  const t=rulerNode();
+  if(ch===" "){
+    /* a lone space has no advance of its own to report — take the difference */
+    t.textContent="x x"; const both=t.getComputedTextLength();
+    t.textContent="xx";  w=both-t.getComputedTextLength();
+  }else{
+    t.textContent=ch; w=t.getComputedTextLength();
+  }
+  charW.set(ch,w); return w;
+}
+function textWidth(s){ let w=0; for(const ch of s) w+=charWidth(ch); return w; }
+
+function wrap(text,room,maxLines){
   if(maxLines<1) return [];
   const words=(text||"").trim().split(/\s+/).filter(Boolean);
   if(!words.length) return [];
   const lines=[]; let cur="", i=0;
   for(;i<words.length;i++){
     const t=cur?cur+" "+words[i]:words[i];
-    if(t.length<=maxChars){ cur=t; continue; }
+    if(textWidth(t)<=room){ cur=t; continue; }
     lines.push(cur||words[i]);
     cur=cur?words[i]:"";
     if(lines.length===maxLines) break;
   }
   if(cur&&lines.length<maxLines) lines.push(cur);
   const shown=lines.join(" ").length;
-  if(shown<(text||"").trim().length)
-    lines[lines.length-1]=lines[lines.length-1].replace(/[.,;:—-]+$/,"")+"…";
+  if(shown<(text||"").trim().length){
+    /* the ellipsis has a width of its own, and the line it joins was already
+       as wide as it was allowed to be — so give it room rather than letting
+       the one truncated line be the only one that overruns the box */
+    let last=lines[lines.length-1].replace(/[.,;:—-]+$/,"");
+    while(last&&textWidth(last+"…")>room)
+      last=last.slice(0,-1).replace(/[\s.,;:—-]+$/,"");
+    lines[lines.length-1]=last+"…";
+  }
   return lines;
 }
 
@@ -593,6 +701,10 @@ function buildModel(rows){
   for(const list of kidsOf.values()) list.sort(byRow);
 
   hasPhotos=[...P.values()].some(p=>p.photo);
+  boxBase=0;
+  for(const p of P.values())
+    boxBase=Math.max(boxBase,
+      boxRows(p,wrap(p.description,BOX_W-SIDE_PAD*2,DESC_LINES).length).height);
   assignGenerations();
 }
 
@@ -1134,6 +1246,28 @@ function inlineCross(uid,kid){
   return true;
 }
 
+/* A name is one line in a 152px box, and some are simply long — an English
+   name with the Chinese one after it in brackets runs the full width at any
+   size worth reading. Shrinking that one name is the quiet way out: it stays
+   whole, stays centred, and the boxes stay a uniform width, where wrapping
+   would cost every box a line and truncation would hide the half people
+   actually search for. Read every width first and write afterwards, so the
+   browser lays out once instead of once per person. */
+function fitNames(){
+  const room=BOX_W-24, ts=[...document.querySelectorAll("#stage text.nm")];
+  for(const t of ts) t.setAttribute("font-size",NAME_SIZE);
+  const w=ts.map(t=>t.getComputedTextLength());
+  ts.forEach((t,i)=>{ if(w[i]>room)
+    t.setAttribute("font-size",Math.max(NAME_MIN,NAME_SIZE*room/w[i]).toFixed(2)); });
+}
+/* Now that the wrap measures real glyphs, the face has to be in before the
+   boxes are sized — a first layout against the fallback would give every box
+   the wrong height. Raced with a timeout, because a font host that never
+   answers should cost a moment, not the chart. */
+const fontsIn=document.fonts&&document.fonts.ready
+  ? Promise.race([document.fonts.ready,new Promise(r=>setTimeout(r,1500))])
+  : Promise.resolve();
+
 function render(){
   setMetrics();                     /* photos may have appeared since load */
   totalW=layout();
@@ -1358,26 +1492,32 @@ function render(){
         /* initials keep the row visually even for people with no photo yet */
         g.appendChild(el("circle",{cx,cy,r:PHOTO_R,class:"avatar-blank"}));
         /* baseline offset follows the type size, which follows the circle */
-        const ini=el("text",{x:cx,y:cy+7,"text-anchor":"middle",class:"initials"});
+        const ini=el("text",{x:cx,y:cy+PHOTO_R*.22,"text-anchor":"middle",
+          "font-size":Math.round(PHOTO_R*.625),class:"initials"});
         ini.textContent=initials(p.name);
         g.appendChild(ini);
       }
       g.appendChild(el("circle",{cx,cy,r:PHOTO_R,class:"avatar-ring"}));
     }
 
-    const nm=el("text",{x:p.x+BOX_W/2,y:p.y+band+20,"text-anchor":"middle",class:"nm"});
+    const lines2=wrap(p.description,BOX_W-SIDE_PAD*2,DESC_LINES);
+    const rows=boxRows(p,lines2.length);
+    const nm=el("text",{x:p.x+BOX_W/2,y:p.y+band+rows.name,"text-anchor":"middle",
+      "font-size":NAME_SIZE,class:"nm"});
     nm.textContent=p.name;
     g.appendChild(nm);
 
-    const yr=el("text",{x:p.x+BOX_W/2,y:p.y+band+34,"text-anchor":"middle",class:"yr"});
-    yr.textContent=p.birth?(p.death?`${p.birth}–${p.death}`:`b. ${p.birth}`):"";
-    g.appendChild(yr);
+    if(rows.year!=null){
+      const yr=el("text",{x:p.x+BOX_W/2,y:p.y+band+rows.year,"text-anchor":"middle",class:"yr"});
+      yr.textContent=p.death?`${p.birth}–${p.death}`:`b. ${p.birth}`;
+      g.appendChild(yr);
+    }
 
-    const lines2=wrap(p.description,DESC_CHARS,DESC_LINES);
     if(lines2.length){
-      g.appendChild(el("line",{x1:p.x+14,y1:p.y+band+42,x2:p.x+BOX_W-14,y2:p.y+band+42,class:"divider"}));
+      g.appendChild(el("line",{x1:p.x+SIDE_PAD,y1:p.y+band+rows.rule,
+        x2:p.x+BOX_W-SIDE_PAD,y2:p.y+band+rows.rule,class:"divider"}));
       lines2.forEach((ln,i)=>{
-        const t=el("text",{x:p.x+BOX_W/2,y:p.y+band+56+i*12,"text-anchor":"middle",class:"desc"});
+        const t=el("text",{x:p.x+BOX_W/2,y:p.y+band+rows.desc+i*DESC_STEP,"text-anchor":"middle",class:"desc"});
         t.textContent=ln;
         g.appendChild(t);
       });
@@ -1391,6 +1531,7 @@ function render(){
     nodes.appendChild(g);
   }
 
+  fitNames();
   showIssues();
   repaint();
 }
@@ -1986,6 +2127,7 @@ async function load(){
     let rows;
     try{ rows=await loadTab(id,PEOPLE_TAB); }
     catch(e){ rows=await loadTab(id,""); }
+    await fontsIn;
     buildModel(rows); render(); fit(); startView(); openHash();
     document.getElementById("demoNote").hidden=!isDemo;
     /* with the tip hidden on a phone, a footer with no demo note in it is an

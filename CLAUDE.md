@@ -320,7 +320,7 @@ works until the first remarriage.
    whole sibling group — which can include the children of a partner's other
    union — so it can land a handful of pixels off the parent's own centre, and
    the bus then degenerates into a stair-step that reads as a rendering bug
-   rather than a junction. Nobody can see a line leaving a 152px box a few
+   rather than a junction. Nobody can see a line leaving a 200px box a few
    pixels off centre; everybody can see the kink. `snapReach` is `SNAP` (38, a
    quarter box) for a single parent, whose "bar" is the whole box bottom, but
    only half the gap between the boxes for a couple, because their drop has to
@@ -331,7 +331,7 @@ works until the first remarriage.
    centred as a group, so one of them regularly lands two or three pixels off
    the drop, and the bus between them becomes a step in what looks like one
    line. `STUB_SNAP` (8) puts such a stub on the drop instead. Both fixes are
-   the same trade: a few pixels off the centre of a 152px box cannot be seen,
+   the same trade: a few pixels off the centre of a 200px box cannot be seen,
    and a three-pixel dogleg in a connector can — people read it as a bug,
    because it is one. Neither moves a box; they only move where a line is
    drawn.
@@ -393,11 +393,18 @@ If photos stop loading, that is the first thing to check.
 the column did.
 
 People without a photo get their initials in a circle, so a row with one
-photo in it doesn't look broken. `PHOTO_BAND` is derived from `PHOTO_R`, so
-resizing the face is one number; the only gap under the circle is the
-name's own leading. Both are drawn through a single
+photo in it doesn't look broken, and the initials are sized off `PHOTO_R`
+rather than pinned to a number of their own. Both are drawn through a single
 `clipPathUnits="objectBoundingBox"` circle, which crops any image to a circle
 regardless of its size or position — one clip path for the whole chart.
+
+**The margin is the constant and the radius is the leftover**, not the other
+way round: `PHOTO_PAD` (32) is the inset on all three sides and
+`PHOTO_R = BOX_W/2 - PHOTO_PAD` is what the box has left. Sizing the face first
+and hoping the margins agreed is how it once ended up with 32px at the sides
+and 6px at the top — even-looking in isolation, and obviously wrong the moment
+anybody looked at the whole card. Text keeps a much tighter `SIDE_PAD` (8): a
+face wants air around it, a sentence wants the width.
 
 Drive photos of living relatives in a link-shared folder are world-readable
 to anyone with the URL, same as the birth years. Still unresolved.
@@ -420,8 +427,26 @@ you were looking at not the box you had zoomed towards. Removing it took out
 re-renders at all.
 
 What is left is `setMetrics()`, which computes `BOX_H`, `GEN_H` and `DROP` from
-`BOX_BASE`/`GEN_BASE` plus the photo band. The only thing that still varies is
-whether the sheet has photos, and that changes once, when the rows arrive.
+`BOX_BASE`/`GEN_BASE` plus the photo band. Two things vary, and both are
+settled once, when the rows arrive: whether the sheet has photos, and how tall
+the boxes have to be.
+
+**`BOX_BASE` is measured from the family, not fixed.** It was 176px for years —
+room for `DESC_LINES` (10) whether or not a single person had written ten, so a
+family whose notes run to a line each paid ~110px of empty box apiece and the
+chart read as a grid of tall blank cards. `boxRows(p, lines)` now walks one
+person's card and returns both the baselines and the height it needs; the
+tallest answer over everyone becomes `BOX_BASE`. Ten lines still get ten if
+somebody writes them.
+
+`boxRows` also writes the rhythm as **gaps between the pieces** rather than
+offsets from the top (`NAME_Y`, then `YEAR_GAP`, `RULE_GAP`, `DESC_GAP`,
+`DESC_STEP`, `FOOT`). With offsets, every piece knew where the years line sat
+whether or not the person had one, so a card with no dates carried the empty
+slot anyway — a name, a hole, then the description, which reads as a gap
+somebody forgot rather than as a date nobody knows. Gaps let what is missing
+take up no room. `NAME_Y` stays fixed so names still line up across a row;
+only what hangs below it moves.
 
 If a low-zoom view ever does need simplifying, do it in CSS off a class on the
 `<svg>` — fading `.desc` out costs no re-render and moves nothing, which is the
@@ -434,6 +459,45 @@ new that lives in a class on `.person` has to be added there or it will
 vanish the first time the chart is rebuilt. The same goes for anything keyed to
 coordinates: `linkGeom` and the lit-lineage layer are rebuilt by every render,
 and `repaint()` redraws the bold run from them.
+
+## Text that measures itself
+
+SVG doesn't wrap, so `wrap()` has to decide the line breaks. It used to do it
+by counting characters against a `DESC_CHARS` constant, and a count is not a
+width. The constant had to be re-tuned by hand every time the type or the box
+changed — six times in one afternoon of design tweaks — and it had to be
+pessimistic enough for the widest line it might ever meet, so every ordinary
+line stopped well short of the room it was allowed. The nominal margin was
+14px and the margin you actually saw was nearer 30.
+
+It measures now. `charWidth()` keeps a `Map` of per-character advances taken
+off one hidden `<text class="desc">`, so a hundred-person family costs about
+sixty measurements rather than one per line, and `textWidth()` sums them.
+Chinese, which no character count can approximate, comes out right for free.
+The ruler lives in its own off-screen `<svg>` on the body rather than in
+`#stage`, because `render()` empties `#stage`, and `getComputedTextLength()`
+on a detached node returns 0 — hence the `isConnected` check in `rulerNode()`.
+
+Two consequences worth knowing:
+
+- **The ellipsis has a width.** Truncation used to append `…` *after* the fit
+  check, so the one truncated line was reliably the widest thing in the box —
+  194px in 184px of room. It now drops characters until the line plus the
+  ellipsis fits.
+- **Layout depends on the font, so the font has to be in first.** Box heights
+  come from measured text, so a first layout against the fallback would size
+  every box wrong. `load()` awaits `fontsIn`, which races
+  `document.fonts.ready` against a 1.5s timeout — a font host that never
+  answers should cost a moment, not the chart.
+
+Names get the same treatment from the other end. A name is one line and cannot
+wrap without costing every box in the chart a line, so `fitNames()` measures
+each one and shrinks the ones that overrun to a `NAME_MIN` floor. English name
+plus the Chinese one in brackets runs the full width at any size worth reading,
+and shrinking that one name is quieter than truncating it — people search for
+the half that truncation would hide. Every width is read before any font-size
+is written, so the browser lays out once instead of once per person: 0.4ms
+across 107 people.
 
 ## The selected lineage
 
@@ -611,10 +675,9 @@ brick red, which claimed a second meaning the panel's sentence already carried.
   horizontal run is hopped — the short descents are left plain. The footer
   key that explained the old dashed line is gone: a hopped line that runs
   half the chart explains itself.
-- **Description wrapping is estimated, not measured.** SVG text doesn't wrap,
-  so `wrap()` breaks by character count (`DESC_CHARS = 27`, `DESC_LINES = 10`,
-  and `BOX_H` is sized to hold that many lines). Long unbroken words
-  can run slightly wide. A real fix measures with `getComputedTextLength()`.
+- **Long unbroken words still run wide.** A single word longer than the box
+  becomes its own line and overflows it, same as it always did. Everything
+  else about the wrap is now measured rather than counted (see below).
 - **Width.** Generation 3 is ~2,300px, and fit-to-screen is limited by width,
   not height, so a fitted chart leaves empty space above and below and the
   boxes are still small. A focus mode showing two generations either side of a
@@ -642,6 +705,29 @@ brick red, which claimed a second meaning the panel's sentence already carried.
   under `:focus-visible` is the focus cue instead, so keyboard users keep one
   and the mouse never draws a ring; the blur in `clearSelection` is what stops
   the ring coming back the moment the window regains focus.
+
+- **`touch-action:none` lives on the `body`, not on `#stage`.** Safari ignores
+  `touch-action` on SVG elements, so the declaration sat for a long time on the
+  one element in the page that could not carry it, and the chart's own
+  background stayed pinchable while everything else behaved. On iOS a pinch out
+  past 1:1 hands the tab to the app switcher, and page zoom is a state the
+  chart's own zoom cannot undo. Ancestors count toward the effective value, so
+  saying it once on the body covers the chart, the panel and the frame;
+  `#panelBody` opts back into a vertical drag with `pan-y`, which works because
+  the intersection with an ancestor stops at whatever is actually being
+  scrolled. Safari runs its own pinch alongside all this, hence the
+  `gesturestart`/`gesturechange` guard on the document.
+
+- **`user-select:none` on `#stage` only.** A pan that wandered into the panel
+  selected everything between mousedown and mouseup — 2,029 characters in the
+  test. Scoping it to the chart is what leaves the panel's own text selectable,
+  which is where anyone would actually want to copy from.
+
+- **`#panelBody.scrollTop = 0` when the panel opens.** The scroll lives on the
+  body and survives the panel closing, so without it a long entry read halfway
+  down leaves the next person opening mid-sentence. At open time rather than on
+  close, which also covers navigating between people by a relation link without
+  the panel ever shutting.
 
 - **JSONP, not `fetch`.** Script tags ignore CORS, so the page works opened from
   `file://` as well as hosted. Switching to `fetch` reintroduces a null-origin
@@ -733,6 +819,13 @@ where a whole family fits on screen a box is a thumbnail and a 2.75px stroke a
 hairline, which is what the first version of this was. Generation bands are
 tinted but unlabeled.
 
+A card has three weights, not two. The name is `--ink` at 20px, the note under
+it is `--note` (`#3F4841`) at 18px, and the years and other furniture are
+`--muted` at 14px. `--note` exists because the note is the only thing on a card
+anyone reads twice, and it was sharing a colour with the footer and the panel's
+definition terms — darkening `--muted` to fix the card would have dragged all
+of those with it.
+
 ## The demo family
 
 `demo-family.csv` is invented, and it is shaped to exercise the parts of this
@@ -750,8 +843,10 @@ Testing) rather than at the real family.
 
 1. Focus mode — click a person, show two generations up and down.
 2. Half-sibling cue on the chart itself; currently only visible in the panel.
-3. Measured text wrapping instead of character estimation.
-4. Decide the privacy posture before circulating the URL.
+3. Decide the privacy posture before circulating the URL.
+4. `SNAP` (38) was set as a quarter of a 152px box and did not move when the
+   box went to 200. It is a fifth now. Probably wants to be 50, but it changes
+   where connectors snap, so it needs measuring rather than assuming.
 
 `sort_order` is closed rather than pending: row order is the handle, and a
 second ordering column would only give the sheet two ways to say one thing.
