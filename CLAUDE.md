@@ -156,16 +156,16 @@ works until the first remarriage.
    **Why the row cannot simply win.** Sorting every generation by its own row
    and also centring parents over children is not a hard problem, it is an
    impossible one whenever a sheet lists generations in disagreeing orders.
-   Three families, gen 1 listed Aqin, LiZhu, QiuHong, but the children listed
-   QiuHong's first:
+   Three families A, B, C, listed in that order in gen 1, but the children
+   listed C's first:
 
-       x(Aqin) < x(LiZhu) < x(QiuHong)                        row order, gen 1
-       centre(QH kids) < centre(Aqin kids) < centre(LiZhu kids)  row order, gen 2
+       x(A) < x(B) < x(C)                                 row order, gen 1
+       centre(C kids) < centre(A kids) < centre(B kids)    row order, gen 2
 
    Centring says each parent sits on their own children's centre; substitute
-   and you get `x(QiuHong) < x(Aqin) < x(LiZhu)`, contradicting the first
-   line. This was built and measured: it produced an 890px bus across the
-   chart and dead space between two siblings. Reverted.
+   and you get `x(C) < x(A) < x(B)`, contradicting the first line. This was
+   built and measured: it produced an 890px bus across the chart and dead
+   space between two siblings. Reverted.
 
    How often it bites, over 366 parent pairs: **zero irreconcilable pairs on
    every naturally-authored fixture** — the demo (31 pairs), the 70-person
@@ -177,9 +177,10 @@ works until the first remarriage.
    the strict one is infeasible anyway.
 
    A worthwhile future feature: detect those pairs and name them in the
-   validator — "Aqin's children are listed after QiuHong's, but Aqin is
-   listed first" — which turns an unfixable layout problem into a sheet the
-   family can fix, after which row order is exact by construction.
+   validator — "A's children are listed after C's, but A is listed first",
+   with the real names in place of the letters — which turns an unfixable
+   layout problem into a sheet the family can fix, after which row order is
+   exact by construction.
 
 4. **Horizontal (x)** — `claim`, `measure`, `place`, then `settle`.
 
