@@ -119,10 +119,20 @@ aside{
   background:var(--card); border-left:1px solid var(--hair);
   display:flex; flex-direction:column; overflow:hidden;
   transform:translateX(100%); transition:transform .22s ease;
+  /* No gesture starting in here is meant for the browser. A pinch aimed at a
+     photo, or a second finger landing while the other scrolls, used to zoom
+     the whole page — and page zoom is a state the chart's own zoom can't undo,
+     so the reader is left pinching the frame back to size. The chart says the
+     same thing for the same reason; between them the page has no pinchable
+     surface left. */
+  touch-action:none;
 }
 /* The scroll lives here rather than on the panel, so the close button — which
    is positioned against the panel — stays where it was put. */
-#panelBody{flex:1; overflow-y:auto; padding:1.4rem 1.5rem}
+/* pan-y, not none: this is the one thing in the panel a finger is allowed to
+   do. It also spends the double-tap, which on a phone zooms rather than
+   selecting a word. */
+#panelBody{flex:1; overflow-y:auto; padding:1.4rem 1.5rem; touch-action:pan-y}
 aside.open{transform:none}
 @media (prefers-reduced-motion:reduce){aside{transition:none}}
 
@@ -1865,6 +1875,12 @@ function pickPerson(id){
   }
   select(id);
 }
+/* Safari runs its own pinch on top of touch-action and needs telling twice.
+   These events fire nowhere else, so the listeners cost nothing when they are
+   not needed. */
+for(const ev of ["gesturestart","gesturechange"])
+  panel.addEventListener(ev,e=>e.preventDefault());
+
 document.getElementById("closePanel").addEventListener("click",clearSelection);
 
 /* Clicking anywhere that is not a person restores the tree to full strength.
