@@ -15,6 +15,11 @@
      furniture — dark enough to read at a glance, still clearly not the name */
   --note:#3F4841;
   --rule:#9AA096; --hair:#C8CCC4; --pine:#2E6B4F; --brick:#A6564A;
+  /* the connectors are darker than the box strokes on purpose. A border is
+     furniture and can recede; the lines are the argument the chart is making,
+     and at the zoom where a whole family fits they were the first thing to
+     dissolve into the ground. */
+  --wire:#6E7669;
   /* the selection reads against pine lineage, not with it. Two weights of
      the same idea: azure for the one box you clicked, marine for the quieter
      mark on the far end of a comparison. */
@@ -91,8 +96,8 @@ main{flex:1; position:relative; overflow:hidden}
 .avatar-ring{fill:none; stroke:var(--rule); stroke-width:.75}
 .initials{fill:var(--muted); text-anchor:middle}   /* size set with the circle */
 .divider{stroke:var(--rule); stroke-width:.5; opacity:.45}
-.link{stroke:var(--rule); stroke-width:1; fill:none}
-.link.cross{stroke:var(--rule)}
+.link{stroke:var(--wire); stroke-width:1; fill:none}
+.link.cross{stroke:var(--wire)}
 /* The selected person's line of descent, drawn over the sage rules in its own
    layer under the boxes. */
 .lit-link{fill:none; stroke:var(--pine); stroke-width:2.25; stroke-linecap:round}
@@ -150,9 +155,43 @@ aside{
 /* pan-y is the one exception to the body's `none`: scrolling is the only thing
    a finger is allowed to do in the panel. It also spends the double-tap, which
    on a phone zooms rather than selecting a word. */
-#panelBody{flex:1; overflow-y:auto; padding:1.4rem 1.5rem; touch-action:pan-y}
+#panelBody{flex:1; overflow-y:auto; padding:1.4rem 1.5rem; touch-action:pan-y;
+            overscroll-behavior:contain}
 aside.open{transform:none}
 @media (prefers-reduced-motion:reduce){aside{transition:none}}
+/* The sheet has a third state on a phone: parked at the bottom, showing only
+   who is selected. Reading a card and then wanting the chart back used to mean
+   closing the card and losing the selection with it; parked, you can tap your
+   way around the tree with the name following you and pull the detail back up
+   when you want it. PEEK is that height — a grabber and one line. */
+.grip{display:none}
+aside.dragging{transition:none}          /* the finger is the animation */
+@media (max-width:860px){
+  .grip{
+    display:flex; align-items:center; gap:.6rem; flex:none;
+    height:3.4rem; padding:0 3rem 0 1.1rem; cursor:grab;
+    border-bottom:1px solid transparent; background:var(--card);
+  }
+  .grip i{
+    flex:none; width:2.2rem; height:.28rem; border-radius:.28rem;
+    background:var(--hair);
+  }
+  /* the name is the whole point of the parked state, and clutter above a card
+     that already says it — so it only shows when the card itself doesn't */
+  .grip span{
+    font-size:.95rem; font-weight:500; color:var(--ink);
+    white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+    opacity:0; transition:opacity .18s ease;
+  }
+  aside.peek .grip span{opacity:1}
+  /* .open.peek, not .peek: `aside.open{transform:none}` sits later in the
+     sheet at equal specificity and would otherwise win, leaving the class on
+     and the sheet exactly where it was. */
+  aside.open.peek{transform:translateY(calc(100% - 3.4rem))}
+  aside.peek #panelBody{overflow:hidden}
+  aside.peek .close{opacity:0; pointer-events:none}
+  .close{transition:opacity .18s ease}
+}
 
 /* ---- phones ----
    A 4,000px chart and a 390px screen have no scale in common, so the work here
@@ -264,6 +303,8 @@ footer{
 <main>
   <svg id="stage" role="img" aria-label="Family chart"></svg>
   <aside id="panel" aria-live="polite">
+    <div class="grip" id="grip" role="button" tabindex="0"
+         aria-label="Collapse or expand this card"><i></i><span id="peekName"></span></div>
     <button class="close" id="closePanel" aria-label="Close">&times;</button>
     <div id="panelBody">
     <img id="pPhoto" alt="" hidden>
@@ -435,7 +476,12 @@ const PHOTO_TOP=PHOTO_PAD;
    LANE_GAP is the clearance two buses need before they count as clear of each
    other. The ladder has to fit in GEN_BASE-BOX_BASE, so the last lane still
    leaves a stub's worth of room above the next row. */
-const LANE0=22, LANE_STEP=24, LANE_MAX=4, LANE_GAP=34, HOP=4;
+const LANE0=22, LANE_STEP=24, LANE_MAX=4, LANE_GAP=34;
+/* The bump a horizontal run makes over a line it crosses. At 4 it was a
+   technically-correct dimple nobody could see, which is the same as not
+   drawing it: the whole point is to say "these two do not meet". Big enough
+   to read costs a little of the run's straightness, which is the trade. */
+const HOP=7;
 /* How far an only child may sit off a single parent's centre before the jog is
    worth drawing rather than absorbing. A quarter of a box: past that the line
    would leave the parent visibly off centre. A couple gets less — see
@@ -1209,10 +1255,16 @@ function hops(x0,x1,y,verticals){
               &&Math.min(v.y1,v.y2)<y&&Math.max(v.y1,v.y2)>y)
     .map(v=>v.x)
     .sort((a,b)=>right?a-b:b-a);
-  let d="";
-  for(const x of at)
+  let d="", prev=null;
+  for(const x of at){
+    /* two crossings closer together than a bump is wide would draw arcs
+       through each other — a knot, which reads worse than the plain line the
+       hop was there to clarify. Past the first, they share one. */
+    if(prev!=null&&Math.abs(x-prev)<HOP*2+1) continue;
+    prev=x;
     d+=`L${right?x-HOP:x+HOP} ${y}`
       +`A${HOP} ${HOP} 0 0 ${right?1:0} ${right?x+HOP:x-HOP} ${y}`;
+  }
   return d+`L${x1} ${y}`;
 }
 
@@ -1566,6 +1618,7 @@ if(window.visualViewport){
    stops at the smallest size still worth looking at and lets you pan. */
 const NARROW = () => window.innerWidth<=860;   /* keep in step with the media query */
 function fit(){
+  stopGlide();
   const r=svgRect();
   view.k=Math.max(NARROW()?.3:0,
     Math.min(r.width/(totalW+40), r.height/(totalH+40), 1));
@@ -1578,10 +1631,11 @@ function fit(){
 const FRAME_PAD=56;
 function fitTo(people){
   if(!people.length) return;
+  stopGlide();
   const r=svgRect();
   const open=panel.classList.contains("open");
   const w=r.width-(open&&!NARROW()?panel.offsetWidth:0);
-  const h=r.height-(open&&NARROW()?panel.offsetHeight:0);
+  const h=r.height-(NARROW()?sheetH():0);
   const x0=Math.min(...people.map(p=>p.x)), x1=Math.max(...people.map(p=>p.x+BOX_W));
   const y0=Math.min(...people.map(p=>p.y)), y1=Math.max(...people.map(p=>p.y+BOX_H));
   view.k=Math.min(K_MAX,Math.max(K_MIN,Math.min(
@@ -1616,8 +1670,9 @@ function startView(){
 function keepVisible(id){
   if(!NARROW()) return;
   const p=P.get(id); if(!p||p.x==null) return;
+  stopGlide();
   const r=svgRect();
-  const floor=r.height-(panel.classList.contains("open")?panel.offsetHeight:0)-8;
+  const floor=r.height-sheetH()-8;
   const x0=view.x+p.x*view.k, x1=x0+BOX_W*view.k;
   const y0=view.y+p.y*view.k, y1=y0+BOX_H*view.k;
   if(x0<8||x1>r.width-8) view.x=r.width/2-(p.x+BOX_W/2)*view.k;
@@ -1628,9 +1683,10 @@ function keepVisible(id){
 /* Centre one person at a readable zoom — how a permalink arrives. */
 function focusOn(id){
   const p=P.get(id); if(!p||p.x==null) return;
+  stopGlide();
   const r=svgRect();
   /* centre in what the sheet leaves of the chart, not in the whole viewport */
-  const h=r.height-(NARROW()&&panel.classList.contains("open")?panel.offsetHeight:0);
+  const h=r.height-(NARROW()?sheetH():0);
   view.k=1;
   view.x=r.width/2-(p.x+BOX_W/2)*view.k;
   view.y=h/2-(p.y+BOX_H/2)*view.k;
@@ -1641,6 +1697,41 @@ function focusOn(id){
    so pinch has to be implemented here or a phone has no way to zoom at all. */
 const K_MIN=.12, K_MAX=2.5, pointers=new Map();
 let drag=null, pinch=null, moved=0;
+
+/* ---- flick ----
+   A chart this wide is mostly travelled by dragging, and a drag that stops
+   dead where the finger left costs a second gesture for every screen of
+   distance. Velocity is the average of the last few moves rather than the
+   last one, because the final move before a lift is often a slow one — the
+   finger settling — and reading only that turns a hard flick into nothing.
+   FRICTION is per frame at 60Hz and scaled by the real frame time, so the
+   glide covers the same ground on a slow tablet as on a fast desktop. */
+const FLICK_MIN=.12,       /* px/ms below which a lift is a stop, not a throw */
+      FRICTION=.84, TAIL=.03;   /* and where the glide is slow enough to end */
+/* FRICTION started at .94, which is roughly what a scrolling list wants: a
+   hard flick coasted 540px over a second and a quarter. A list is a rail and
+   overshooting it costs nothing, but a chart is a place — you throw it towards
+   somebody, and a glide that keeps going after you have arrived has to be
+   caught and dragged back. Short and quick reads as weight; long reads as
+   slippery. .84 is 204px in .4s. */
+let vel={x:0,y:0}, glide=0;
+const stopGlide=()=>{ if(glide){ cancelAnimationFrame(glide); glide=0; } };
+const still=matchMedia("(prefers-reduced-motion: reduce)");
+function throwChart(){
+  stopGlide();
+  if(still.matches) return;
+  if(Math.hypot(vel.x,vel.y)<FLICK_MIN) return;
+  let last=performance.now();
+  const step=now=>{
+    const dt=Math.min(64,now-last); last=now;
+    const decay=Math.pow(FRICTION,dt/16.7);
+    view.x+=vel.x*dt; view.y+=vel.y*dt;
+    vel.x*=decay; vel.y*=decay;
+    apply();
+    glide=Math.hypot(vel.x,vel.y)>TAIL?requestAnimationFrame(step):0;
+  };
+  glide=requestAnimationFrame(step);
+}
 
 /* Zoom so the point under (mx,my) stays under it. */
 function zoomAbout(k,mx,my){
@@ -1654,6 +1745,7 @@ function span(){
   return {d:Math.max(1,Math.hypot(a.x-b.x,a.y-b.y)),cx:(a.x+b.x)/2,cy:(a.y+b.y)/2};
 }
 svg.addEventListener("pointerdown",e=>{
+  stopGlide();
   pointers.set(e.pointerId,{x:e.clientX,y:e.clientY});
   if(pointers.size===2){
     const r=svgRect(), t=span();
@@ -1665,8 +1757,9 @@ svg.addEventListener("pointerdown",e=>{
     return;
   }
   if(pointers.size>1) return;
-  drag={dx:e.clientX-view.x, dy:e.clientY-view.y, sx:e.clientX, sy:e.clientY};
-  moved=0; svg.classList.add("drag");
+  drag={dx:e.clientX-view.x, dy:e.clientY-view.y, sx:e.clientX, sy:e.clientY,
+        px:e.clientX, py:e.clientY, t:performance.now()};
+  vel={x:0,y:0}; moved=0; svg.classList.add("drag");
 });
 window.addEventListener("pointermove",e=>{
   if(pointers.has(e.pointerId)) pointers.set(e.pointerId,{x:e.clientX,y:e.clientY});
@@ -1682,12 +1775,24 @@ window.addEventListener("pointermove",e=>{
   }
   if(!drag) return;
   moved=Math.max(moved,Math.hypot(e.clientX-drag.sx,e.clientY-drag.sy));
+  const now=performance.now(), dt=now-drag.t;
+  if(dt>0){
+    /* a rolling average, weighted towards the newest sample */
+    const k=Math.min(1,dt/40);
+    vel.x+=((e.clientX-drag.px)/dt-vel.x)*(1-Math.pow(1-.35,1+k));
+    vel.y+=((e.clientY-drag.py)/dt-vel.y)*(1-Math.pow(1-.35,1+k));
+    drag.px=e.clientX; drag.py=e.clientY; drag.t=now;
+  }
   view.x=e.clientX-drag.dx; view.y=e.clientY-drag.dy; apply();
 });
 function lift(e){
   pointers.delete(e.pointerId);
   if(pointers.size<2) pinch=null;
-  if(!pointers.size){ drag=null; svg.classList.remove("drag"); return; }
+  if(!pointers.size){
+    /* a finger resting before it lifts should not throw the chart */
+    if(drag&&performance.now()-drag.t>90) vel={x:0,y:0};
+    drag=null; svg.classList.remove("drag"); throwChart(); return;
+  }
   /* one finger left over from a pinch: carry on panning from where it is */
   const [p]=[...pointers.values()];
   drag={dx:p.x-view.x, dy:p.y-view.y, sx:p.x, sy:p.y}; moved=99;
@@ -1702,7 +1807,7 @@ for(const ev of ["gesturestart","gesturechange"])
   document.addEventListener(ev,e=>e.preventDefault(),{passive:false});
 
 svg.addEventListener("wheel",e=>{
-  e.preventDefault();
+  e.preventDefault(); stopGlide();
   const r=svgRect();
   zoomAbout(view.k*(e.deltaY<0?1.12:1/1.12),e.clientX-r.left,e.clientY-r.top);
 },{passive:false});
@@ -1719,6 +1824,116 @@ window.addEventListener("resize",()=>{
 /* ---- selection + detail panel ---- */
 const panel=document.getElementById("panel");
 let selectedId=null, compareId=null, picking=false;
+
+/* ---- the sheet, on a phone ----
+   Three states, not two: up, parked at the bottom showing only the name, and
+   gone. Everything that frames a person — keepVisible, fitTo, focusOn — asks
+   sheetH() for the room the sheet is actually taking, so a parked sheet costs
+   the chart 54px instead of half the screen and those functions stop having to
+   know which state it is in. */
+const PEEK=()=>3.4*parseFloat(getComputedStyle(document.documentElement).fontSize);
+function sheetH(){
+  if(!NARROW()||!panel.classList.contains("open")) return 0;
+  return panel.classList.contains("peek")?PEEK():panel.offsetHeight;
+}
+/* "closed" clears the selection through the usual door rather than just hiding
+   the sheet, so the chart never keeps a bold lineage for a card nobody sees. */
+function setSheet(state){
+  panel.style.transform="";
+  panel.classList.remove("dragging");
+  if(state==="closed"){ clearSelection(); return; }
+  panel.classList.toggle("peek",state==="peek");
+  panel.classList.add("open");
+}
+
+/* Dragging the grabber. The sheet follows the finger 1:1 while it is down —
+   a sheet that lags its own handle feels broken in a way no easing fixes — and
+   the release picks a state by where it ended up, or by how fast it was going
+   if the throw was quick enough to mean it. */
+const grip=document.getElementById("grip"), pbody=document.getElementById("panelBody");
+let sheetDrag=null;
+function beginSheet(y,tappable){
+  const peeked=panel.classList.contains("peek");
+  sheetDrag={y, t:performance.now(), v:0, from:peeked?"peek":"open",
+             base:peeked?panel.offsetHeight-PEEK():0, moved:0, tappable};
+  panel.classList.add("dragging");
+}
+function moveSheet(y){
+  const now=performance.now(), dt=now-sheetDrag.t;
+  if(dt>0){ sheetDrag.v=(y-sheetDrag.y)/dt; sheetDrag.t=now; }
+  const dy=y-sheetDrag.y;
+  sheetDrag.moved=Math.max(sheetDrag.moved,Math.abs(dy));
+  sheetDrag.y=y;
+  /* rubber past the top, because a sheet that can be dragged off the screen
+     upwards is a sheet you can lose */
+  let off=sheetDrag.base+dy;
+  sheetDrag.base=off<0?off/3:off;
+  panel.style.transform=`translateY(${Math.max(0,sheetDrag.base)}px)`;
+}
+function endSheet(){
+  const d=sheetDrag, full=panel.offsetHeight, peek=PEEK();
+  sheetDrag=null;
+  panel.classList.remove("dragging");
+  /* a tap on a parked sheet is a request to read it */
+  if(d.tappable&&d.moved<6){ setSheet(d.from==="peek"?"open":"peek"); return; }
+  const FLING=.55;                       /* px/ms, about a deliberate flick */
+  if(d.v>FLING)  return setSheet(d.from==="peek"?"closed":"peek");
+  if(d.v<-FLING) return setSheet("open");
+  /* halfway is the line: let go above it and the sheet comes back up, below it
+     and it parks. Decided on release rather than crossed live, because a sheet
+     that snaps away mid-drag takes the gesture out of your hands */
+  const rest=Math.max(0,d.base);
+  setSheet(rest<(full-peek)/2?"open":rest<full-peek/2?"peek":"closed");
+}
+grip.addEventListener("pointerdown",e=>{
+  if(!NARROW()) return;
+  beginSheet(e.clientY,true);
+  grip.setPointerCapture(e.pointerId);
+});
+grip.addEventListener("pointermove",e=>{ if(sheetDrag) moveSheet(e.clientY); });
+function dropSheet(e){
+  if(!sheetDrag) return;
+  grip.releasePointerCapture&&grip.releasePointerCapture(e.pointerId);
+  endSheet();
+}
+grip.addEventListener("pointerup",dropSheet);
+grip.addEventListener("pointercancel",dropSheet);
+
+/* ---- the scroll hands the sheet back ----
+   Read to the top of a card and keep pulling, and the pull has nowhere left to
+   go: the browser's answer is a rubber-band and then nothing, which is a dead
+   end at exactly the moment you were asking for something. So the sheet takes
+   the gesture over there and follows the finger down — one continuous motion
+   from reading to putting it away, and reversible the whole time, because
+   dragging back up before you let go returns it.
+
+   The takeover has to be claimed on the first move that means it: touchmove
+   stops being cancelable once the browser has committed to a scroll, and at
+   scrollTop 0 pulling down there is no scroll to commit to — hence
+   overscroll-behavior:contain, so no bounce gets there first. */
+let fromTop=null;
+pbody.addEventListener("touchstart",e=>{
+  fromTop=(NARROW()&&e.touches.length===1&&pbody.scrollTop<=0)?e.touches[0].clientY:null;
+},{passive:true});
+pbody.addEventListener("touchmove",e=>{
+  if(sheetDrag){ e.preventDefault(); moveSheet(e.touches[0].clientY); return; }
+  if(fromTop==null||e.touches.length!==1) return;
+  const y=e.touches[0].clientY;
+  if(y-fromTop>6&&pbody.scrollTop<=0){
+    e.preventDefault();
+    /* start from where the finger is, so the sheet doesn't jump the threshold */
+    beginSheet(y,false);
+  }
+},{passive:false});
+function bodyLift(){ fromTop=null; if(sheetDrag) endSheet(); }
+pbody.addEventListener("touchend",bodyLift);
+pbody.addEventListener("touchcancel",bodyLift);
+grip.addEventListener("keydown",e=>{
+  if(e.key==="Enter"||e.key===" "){
+    e.preventDefault();
+    setSheet(panel.classList.contains("peek")?"open":"peek");
+  }
+});
 
 /* What a selection draws in bold: every ancestor, plus the siblings standing
    on either side of the person, and the parent-to-child edges that reach them.
@@ -1930,6 +2145,13 @@ function select(id){
      halfway down leaves the next person opening mid-sentence — or, if their
      entry is shorter, opening on nothing at all. */
   document.getElementById("panelBody").scrollTop=0;
+  document.getElementById("peekName").textContent=label(p);
+  /* A new person comes up in full, even if the sheet was parked. Parking it is
+     how you get the chart back, but picking somebody is asking to read about
+     them, and a card that stays down would make that take two gestures every
+     time. Putting it away stays one. */
+  panel.style.transform="";
+  panel.classList.remove("peek");
   panel.classList.add("open");
   keepVisible(id);
 }
@@ -1939,7 +2161,8 @@ function clearSelection(){
   const f=document.activeElement;
   if(f&&f.closest&&f.closest(".person")&&f.blur) f.blur();
   selectedId=null; compareId=null; setPicking(false);
-  panel.classList.remove("open");
+  panel.style.transform="";
+  panel.classList.remove("open","peek","dragging");
   repaint();
   showRelation();      /* the panel is aria-live, so don't leave a stale answer in it */
   setHash(null);

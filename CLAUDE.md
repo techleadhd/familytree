@@ -812,6 +812,59 @@ Three more things a phone needs:
   it was put instead of leaving with the content — and it carries the card's
   own background, or names slide through the ×.
 
+### The sheet has three states
+
+Up, parked at the bottom showing only the name, and gone. Reading a card and
+then wanting the chart back used to mean closing it and losing the selection
+with it; parked, the name follows you and the detail is one swipe away.
+
+`sheetH()` is the single answer to "how much room is the sheet taking" —
+`keepVisible`, `fitTo` and `focusOn` all ask it, so a parked sheet costs the
+chart 54px instead of half the screen and none of them has to know which state
+it is in. `setSheet('closed')` goes through `clearSelection()` rather than just
+hiding the sheet, so the chart never keeps a bold lineage for a card nobody can
+see.
+
+Two entry points, one state machine (`beginSheet` / `moveSheet` / `endSheet`):
+the grabber, and the scroll itself. **Read to the top of the card and keep
+pulling and the sheet takes the gesture over**, following the finger down — one
+continuous motion from reading to putting away. The takeover has to be claimed
+on the first move that means it, because `touchmove` stops being cancelable
+once the browser has committed to a scroll; at `scrollTop` 0 pulling down there
+is nothing to scroll, which is why `#panelBody` also carries
+`overscroll-behavior:contain` — a rubber-band bounce would get there first.
+
+Release decides, not the crossing: past halfway it parks, above it springs
+back, and a flick beats both. Deciding live would snap the sheet away
+mid-drag and take the gesture out of your hands — "drag down, change your mind,
+drag back up" is the thing that has to keep working. A new selection always
+comes up in full: parking is how you get the chart back, but picking somebody
+is asking to read about them.
+
+One CSS trap: the parked rule has to be `aside.open.peek`, because
+`aside.open{transform:none}` sits later in the sheet at equal specificity and
+would otherwise win — leaving the class on and the sheet exactly where it was.
+
+### A flick keeps going
+
+`throwChart()` glides the chart on after a lift. The interesting part is not
+the decay, it is reading the velocity: the last move before a lift is often a
+slow one — the finger settling — so reading only that turns a hard flick into
+nothing. It is a rolling average weighted to the newest sample, and a finger
+that rests more than 90ms before lifting cancels the throw outright.
+
+`FRICTION` is per frame at 60Hz and scaled by the real frame time, so the glide
+covers the same ground on an old tablet as on a fast desktop. It started at
+.94, which is roughly what a scrolling list wants: a hard flick coasted 540px
+over a second and a quarter. A list is a rail and overshooting costs nothing,
+but a chart is a place — you throw it towards somebody, and a glide still
+running after you have arrived has to be caught and dragged back. `.84` is
+204px in .4s. Anything that places the chart deliberately calls `stopGlide()`
+first, and `prefers-reduced-motion` skips it entirely.
+
+Pinch has no momentum on purpose. A flick is a pan gesture; continuing to scale
+after the fingers leave reads as the chart getting away from you.
+
 The breakpoint is **860px in two places** — the media query and `NARROW()` —
 and they have to stay in step, because the script measures the sheet's height to
 keep someone clear of it and would measure a side panel that isn't there.
@@ -837,6 +890,19 @@ is brighter and heavier than anything else on the chart on purpose: at the zoom
 where a whole family fits on screen a box is a thumbnail and a 2.75px stroke a
 hairline, which is what the first version of this was. Generation bands are
 tinted but unlabeled.
+
+Connectors are `--wire` (`#6E7669`), a step darker than the `--rule` used for
+box strokes, the avatar ring and the card divider. A border is furniture and
+can recede; the lines are the argument the chart is making, and at the zoom
+where a whole family fits they were the first thing to dissolve into the
+ground.
+
+`HOP` is 7. At 4 it was a technically-correct dimple nobody could see, which is
+the same as not drawing it — the whole point is to say "these two do not meet".
+Reading it costs a little of the run's straightness, which is the trade. Two
+crossings closer together than a bump is wide share one, because overlapping
+arcs draw a knot, and a knot reads worse than the plain line the hop was there
+to clarify.
 
 A card has three weights, not two. The name is `--ink` at 20px, the note under
 it is `--note` (`#3F4841`) at 18px, and the years and other furniture are
