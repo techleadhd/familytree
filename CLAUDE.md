@@ -848,10 +848,26 @@ would otherwise win — leaving the class on and the sheet exactly where it was.
 ### A flick keeps going
 
 `throwChart()` glides the chart on after a lift. The interesting part is not
-the decay, it is reading the velocity: the last move before a lift is often a
-slow one — the finger settling — so reading only that turns a hard flick into
-nothing. It is a rolling average weighted to the newest sample, and a finger
-that rests more than 90ms before lifting cancels the throw outright.
+the decay, it is reading the velocity, and **the last move is a trap**. Two
+pointermove events can arrive a fraction of a millisecond apart — a coalesced
+pair, a device reporting faster than it paints — and one pixel over a fraction
+of a millisecond is an enormous instantaneous velocity.
+
+Smoothing does not save you. The first version averaged instantaneous `dx/dt`
+with a time-weighted blend, and a single spike was enough: replaying synthetic
+streams through it, a steady 0.3px/ms drag launched at **2.52px/ms** when the
+last four samples arrived in one frame, and at **1.95px/ms** off a single 1px
+jump 0.2ms before the lift. Six to eight times what the hand did, which is
+exactly what it felt like — and only on gentle drags, because a real flick
+already has a velocity big enough to hide the spike.
+
+`tailVelocity()` measures distance over elapsed time across the last
+`TRACK_MS` (80) of the drag instead. Whatever the samples inside the window
+look like, first-to-last over first-to-last is what the finger actually did —
+arithmetically incapable of exceeding it. `MAX_FLICK` (2.2px/ms) caps a genuine
+hard throw, and a window shorter than 12ms is not a throw at all. A finger that
+settles before lifting now reads about 0.06px/ms on its own, below `FLICK_MIN`,
+so the old "did the finger rest" special case is gone.
 
 `FRICTION` is per frame at 60Hz and scaled by the real frame time, so the glide
 covers the same ground on an old tablet as on a fast desktop. It started at

@@ -1707,7 +1707,36 @@ let drag=null, pinch=null, moved=0;
    FRICTION is per frame at 60Hz and scaled by the real frame time, so the
    glide covers the same ground on a slow tablet as on a fast desktop. */
 const FLICK_MIN=.12,       /* px/ms below which a lift is a stop, not a throw */
-      FRICTION=.84, TAIL=.03;   /* and where the glide is slow enough to end */
+      FRICTION=.84, TAIL=.03,   /* and where the glide is slow enough to end */
+      MAX_FLICK=2.2,            /* px/ms — about as fast as a hand can throw */
+      TRACK_MS=80;              /* the tail of the drag the throw is read from */
+
+/* How fast the finger was going, measured as distance over elapsed time across
+   the tail of the drag rather than from the last move.
+
+   The last move is a trap. Two pointermove events can arrive a fraction of a
+   millisecond apart — a coalesced pair, a device reporting faster than it
+   paints — and one pixel over a fraction of a millisecond is an enormous
+   instantaneous velocity. Smoothing does not save you: a single spike given
+   any weight at all is enough to launch a gentle drag across the chart, which
+   is exactly how it behaved. A window cannot do that. Whatever the samples
+   inside it look like, first-to-last over first-to-last is what the hand
+   actually did. */
+let track=[];
+const trackAt=(t,x,y)=>{
+  track.push({t,x,y});
+  while(track.length>2&&t-track[0].t>TRACK_MS) track.shift();
+};
+function tailVelocity(){
+  if(track.length<2) return {x:0,y:0};
+  const a=track[0], b=track[track.length-1], dt=b.t-a.t;
+  /* too short a window to divide by, and a finger that stopped before lifting
+     was not throwing anything */
+  if(dt<12||performance.now()-b.t>90) return {x:0,y:0};
+  const v={x:(b.x-a.x)/dt, y:(b.y-a.y)/dt}, sp=Math.hypot(v.x,v.y);
+  if(sp>MAX_FLICK){ v.x*=MAX_FLICK/sp; v.y*=MAX_FLICK/sp; }
+  return v;
+}
 /* FRICTION started at .94, which is roughly what a scrolling list wants: a
    hard flick coasted 540px over a second and a quarter. A list is a rail and
    overshooting it costs nothing, but a chart is a place — you throw it towards
@@ -1757,8 +1786,8 @@ svg.addEventListener("pointerdown",e=>{
     return;
   }
   if(pointers.size>1) return;
-  drag={dx:e.clientX-view.x, dy:e.clientY-view.y, sx:e.clientX, sy:e.clientY,
-        px:e.clientX, py:e.clientY, t:performance.now()};
+  drag={dx:e.clientX-view.x, dy:e.clientY-view.y, sx:e.clientX, sy:e.clientY};
+  track=[{t:performance.now(),x:e.clientX,y:e.clientY}];
   vel={x:0,y:0}; moved=0; svg.classList.add("drag");
 });
 window.addEventListener("pointermove",e=>{
@@ -1775,27 +1804,20 @@ window.addEventListener("pointermove",e=>{
   }
   if(!drag) return;
   moved=Math.max(moved,Math.hypot(e.clientX-drag.sx,e.clientY-drag.sy));
-  const now=performance.now(), dt=now-drag.t;
-  if(dt>0){
-    /* a rolling average, weighted towards the newest sample */
-    const k=Math.min(1,dt/40);
-    vel.x+=((e.clientX-drag.px)/dt-vel.x)*(1-Math.pow(1-.35,1+k));
-    vel.y+=((e.clientY-drag.py)/dt-vel.y)*(1-Math.pow(1-.35,1+k));
-    drag.px=e.clientX; drag.py=e.clientY; drag.t=now;
-  }
+  trackAt(performance.now(),e.clientX,e.clientY);
   view.x=e.clientX-drag.dx; view.y=e.clientY-drag.dy; apply();
 });
 function lift(e){
   pointers.delete(e.pointerId);
   if(pointers.size<2) pinch=null;
   if(!pointers.size){
-    /* a finger resting before it lifts should not throw the chart */
-    if(drag&&performance.now()-drag.t>90) vel={x:0,y:0};
-    drag=null; svg.classList.remove("drag"); throwChart(); return;
+    vel=drag?tailVelocity():{x:0,y:0};
+    drag=null; track=[]; svg.classList.remove("drag"); throwChart(); return;
   }
   /* one finger left over from a pinch: carry on panning from where it is */
   const [p]=[...pointers.values()];
-  drag={dx:p.x-view.x, dy:p.y-view.y, sx:p.x, sy:p.y}; moved=99;
+  drag={dx:p.x-view.x, dy:p.y-view.y, sx:p.x, sy:p.y};
+  track=[{t:performance.now(),x:p.x,y:p.y}]; moved=99;
 }
 window.addEventListener("pointerup",lift);
 window.addEventListener("pointercancel",lift);
