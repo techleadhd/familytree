@@ -1739,6 +1739,11 @@ function select(id){
   }
   add("Half-siblings",[...new Set(half)].map(h=>({id:h,text:label(P.get(h))})));
 
+  /* A new person is a new panel, so start it at the top. The scroll lives on
+     #panelBody and survives being closed, so without this a long entry read
+     halfway down leaves the next person opening mid-sentence — or, if their
+     entry is shorter, opening on nothing at all. */
+  document.getElementById("panelBody").scrollTop=0;
   panel.classList.add("open");
   keepVisible(id);
 }
