@@ -1541,12 +1541,32 @@ function render(){
    reaches a person group, which is what made selection unreliable. */
 function apply(){ root.setAttribute("transform",`translate(${view.x} ${view.y}) scale(${view.k})`); }
 
+/* The chart's own rectangle, cached until something can have moved it.
+   It is asked for in the middle of a pinch, once per pointermove, and
+   getBoundingClientRect() is a synchronous style-and-layout flush — arriving
+   immediately after apply() has just invalidated the whole chart, so the
+   browser re-lays-out every box, line and glyph before it can answer. One
+   attribute write costs 0.01ms; the same write followed by that question cost
+   10ms on a 60-person chart, which is most of a frame gone before a single
+   pixel is drawn. On an older tablet it is the whole frame and then some.
+   Nothing about the gesture moves the svg, so ask once. */
+let svgBox=null;
+const svgRect=()=>svgBox||(svgBox=svg.getBoundingClientRect());
+const forgetRect=()=>{ svgBox=null; };
+addEventListener("resize",forgetRect);
+addEventListener("orientationchange",forgetRect);
+addEventListener("scroll",forgetRect,true);
+if(window.visualViewport){
+  visualViewport.addEventListener("resize",forgetRect);
+  visualViewport.addEventListener("scroll",forgetRect);
+}
+
 /* On a phone the whole chart at once is a grey smear about five pixels tall,
    and a "fit" that fits everything and shows nothing is worse than one that
    stops at the smallest size still worth looking at and lets you pan. */
 const NARROW = () => window.innerWidth<=860;   /* keep in step with the media query */
 function fit(){
-  const r=svg.getBoundingClientRect();
+  const r=svgRect();
   view.k=Math.max(NARROW()?.3:0,
     Math.min(r.width/(totalW+40), r.height/(totalH+40), 1));
   view.x=(r.width-totalW*view.k)/2;
@@ -1558,7 +1578,7 @@ function fit(){
 const FRAME_PAD=56;
 function fitTo(people){
   if(!people.length) return;
-  const r=svg.getBoundingClientRect();
+  const r=svgRect();
   const open=panel.classList.contains("open");
   const w=r.width-(open&&!NARROW()?panel.offsetWidth:0);
   const h=r.height-(open&&NARROW()?panel.offsetHeight:0);
@@ -1582,7 +1602,7 @@ function startView(){
   const first=[...P.values()].filter(q=>q.x!=null)
     .sort((a,b)=>a.gen-b.gen||a.x-b.x)[0];
   if(!first) return;
-  const r=svg.getBoundingClientRect();
+  const r=svgRect();
   view.k=.8;
   view.x=r.width/2-(first.x+BOX_W/2)*view.k;
   view.y=20-(first.y-20)*view.k;
@@ -1596,7 +1616,7 @@ function startView(){
 function keepVisible(id){
   if(!NARROW()) return;
   const p=P.get(id); if(!p||p.x==null) return;
-  const r=svg.getBoundingClientRect();
+  const r=svgRect();
   const floor=r.height-(panel.classList.contains("open")?panel.offsetHeight:0)-8;
   const x0=view.x+p.x*view.k, x1=x0+BOX_W*view.k;
   const y0=view.y+p.y*view.k, y1=y0+BOX_H*view.k;
@@ -1608,7 +1628,7 @@ function keepVisible(id){
 /* Centre one person at a readable zoom — how a permalink arrives. */
 function focusOn(id){
   const p=P.get(id); if(!p||p.x==null) return;
-  const r=svg.getBoundingClientRect();
+  const r=svgRect();
   /* centre in what the sheet leaves of the chart, not in the whole viewport */
   const h=r.height-(NARROW()&&panel.classList.contains("open")?panel.offsetHeight:0);
   view.k=1;
@@ -1636,7 +1656,7 @@ function span(){
 svg.addEventListener("pointerdown",e=>{
   pointers.set(e.pointerId,{x:e.clientX,y:e.clientY});
   if(pointers.size===2){
-    const r=svg.getBoundingClientRect(), t=span();
+    const r=svgRect(), t=span();
     /* the second finger turns a drag into a pinch, and spends `moved` so the
        lift at the end can't be read as a tap on whoever is underneath */
     drag=null; moved=99; svg.classList.remove("drag");
@@ -1651,7 +1671,7 @@ svg.addEventListener("pointerdown",e=>{
 window.addEventListener("pointermove",e=>{
   if(pointers.has(e.pointerId)) pointers.set(e.pointerId,{x:e.clientX,y:e.clientY});
   if(pinch&&pointers.size>=2){
-    const r=svg.getBoundingClientRect(), t=span();
+    const r=svgRect(), t=span();
     const mx=t.cx-r.left, my=t.cy-r.top;
     /* the world point that was under the midpoint stays under it, so the same
        two fingers pan and scale at once */
@@ -1683,7 +1703,7 @@ for(const ev of ["gesturestart","gesturechange"])
 
 svg.addEventListener("wheel",e=>{
   e.preventDefault();
-  const r=svg.getBoundingClientRect();
+  const r=svgRect();
   zoomAbout(view.k*(e.deltaY<0?1.12:1/1.12),e.clientX-r.left,e.clientY-r.top);
 },{passive:false});
 document.getElementById("fit").addEventListener("click",()=>{fit();});

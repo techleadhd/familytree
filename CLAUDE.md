@@ -678,6 +678,13 @@ brick red, which claimed a second meaning the panel's sentence already carried.
 - **Long unbroken words still run wide.** A single word longer than the box
   becomes its own line and overflows it, same as it always did. Everything
   else about the wrap is now measured rather than counted (see below).
+- **Photos are fetched at `PHOTO_PX` (640) for a 136px avatar.** One size
+  serves the chart and the panel so each face is fetched once, and 640 is what
+  the panel wants on a 2x desktop display. The chart pays for it: 60 photos is
+  ~94MB of decoded bitmap, 107 is ~167MB, and an old tablet re-samples every
+  one of them per frame while you pinch. 384 would cut that by 64%, 320 by 75%,
+  and on a phone or tablet the panel photo is 128px anyway — so the large size
+  is only ever earning its keep on a desktop.
 - **Width.** Generation 3 is ~2,300px, and fit-to-screen is limited by width,
   not height, so a fitted chart leaves empty space above and below and the
   boxes are still small. A focus mode showing two generations either side of a
@@ -717,6 +724,18 @@ brick red, which claimed a second meaning the panel's sentence already carried.
   the intersection with an ancestor stops at whatever is actually being
   scrolled. Safari runs its own pinch alongside all this, hence the
   `gesturestart`/`gesturechange` guard on the document.
+
+- **The svg's rectangle is cached (`svgRect`), not asked for per move.** It was
+  read inside the pinch branch of `pointermove`, once per event.
+  `getBoundingClientRect()` is a synchronous style-and-layout flush, and it
+  landed immediately after `apply()` had invalidated the whole chart, so the
+  browser re-laid-out every box, line and glyph before it could answer: 0.01ms
+  for the attribute write, 4.6ms for the write plus the question, on a
+  60-person chart. That is most of a frame on a desktop and all of one on an
+  older tablet — and it is why zooming dragged while panning did not, since the
+  drag path never asked. Nothing in a gesture moves the svg. Invalidated on
+  resize, orientationchange, scroll and visualViewport changes; if something
+  new can move or resize the chart, it has to call `forgetRect()`.
 
 - **`user-select:none` on `#stage` only.** A pan that wandered into the panel
   selected everything between mousedown and mouseup — 2,029 characters in the
