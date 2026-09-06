@@ -30,6 +30,21 @@ body{
   font-variant-numeric:tabular-nums;
   -webkit-font-smoothing:antialiased;
   display:flex; flex-direction:column; overflow:hidden;
+  /* Nothing in this page is the browser's to zoom. The chart runs its own
+     pinch and the page never scrolls, so a browser zoom is only ever an
+     accident — and an expensive one on iOS, where pinching out past 1:1 hands
+     the tab to the app switcher.
+
+     It has to be declared here, on an HTML element. It was on #stage for a
+     long time and Safari ignores touch-action on SVG, which is why the chart's
+     own background stayed pinchable while everything else behaved: the
+     declaration was sitting on the one element that could not carry it.
+     Ancestors still count, so saying it once on the body covers the chart,
+     the panel and the frame together.
+
+     The intersection with an ancestor stops at whatever is actually being
+     scrolled, so #panelBody below can still opt back into a vertical drag. */
+  touch-action:none;
 }
 header{
   flex:none; display:flex; align-items:baseline; gap:1.5rem;
@@ -52,7 +67,7 @@ button:focus-visible{outline:2px solid var(--pine); outline-offset:1px}
 #warn{color:var(--brick); font-size:.85rem; font-style:italic; cursor:pointer; background:none; border:none; padding:0}
 #warn[hidden]{display:none}
 main{flex:1; position:relative; overflow:hidden}
-#stage{width:100%; height:100%; display:block; cursor:grab; touch-action:none}
+#stage{width:100%; height:100%; display:block; cursor:grab}
 #stage.drag{cursor:grabbing}
 .gen-band{fill:var(--band)}
 .box{stroke:var(--rule); stroke-width:.75}
@@ -119,19 +134,12 @@ aside{
   background:var(--card); border-left:1px solid var(--hair);
   display:flex; flex-direction:column; overflow:hidden;
   transform:translateX(100%); transition:transform .22s ease;
-  /* No gesture starting in here is meant for the browser. A pinch aimed at a
-     photo, or a second finger landing while the other scrolls, used to zoom
-     the whole page — and page zoom is a state the chart's own zoom can't undo,
-     so the reader is left pinching the frame back to size. The chart says the
-     same thing for the same reason; between them the page has no pinchable
-     surface left. */
-  touch-action:none;
 }
 /* The scroll lives here rather than on the panel, so the close button — which
    is positioned against the panel — stays where it was put. */
-/* pan-y, not none: this is the one thing in the panel a finger is allowed to
-   do. It also spends the double-tap, which on a phone zooms rather than
-   selecting a word. */
+/* pan-y is the one exception to the body's `none`: scrolling is the only thing
+   a finger is allowed to do in the panel. It also spends the double-tap, which
+   on a phone zooms rather than selecting a word. */
 #panelBody{flex:1; overflow-y:auto; padding:1.4rem 1.5rem; touch-action:pan-y}
 aside.open{transform:none}
 @media (prefers-reduced-motion:reduce){aside{transition:none}}
@@ -1467,9 +1475,9 @@ function focusOn(id){
   view.y=h/2-(p.y+BOX_H/2)*view.k;
   apply();
 }
-/* Every finger currently down on the chart. `touch-action:none` means the
-   browser hands us the gesture instead of scrolling the page with it, so pinch
-   has to be implemented here or a phone has no way to zoom at all. */
+/* Every finger currently down on the chart. The body's `touch-action:none`
+   means the browser hands us the gesture instead of zooming the page with it,
+   so pinch has to be implemented here or a phone has no way to zoom at all. */
 const K_MIN=.12, K_MAX=2.5, pointers=new Map();
 let drag=null, pinch=null, moved=0;
 
@@ -1525,6 +1533,13 @@ function lift(e){
 }
 window.addEventListener("pointerup",lift);
 window.addEventListener("pointercancel",lift);
+/* Safari runs its own pinch alongside touch-action and needs telling twice.
+   On the document, because the gesture belongs to whatever is under the
+   fingers and every surface here gives the same answer. These events fire
+   nowhere else, so the listeners cost nothing when they are not needed. */
+for(const ev of ["gesturestart","gesturechange"])
+  document.addEventListener(ev,e=>e.preventDefault(),{passive:false});
+
 svg.addEventListener("wheel",e=>{
   e.preventDefault();
   const r=svg.getBoundingClientRect();
@@ -1875,12 +1890,6 @@ function pickPerson(id){
   }
   select(id);
 }
-/* Safari runs its own pinch on top of touch-action and needs telling twice.
-   These events fire nowhere else, so the listeners cost nothing when they are
-   not needed. */
-for(const ev of ["gesturestart","gesturechange"])
-  panel.addEventListener(ev,e=>e.preventDefault());
-
 document.getElementById("closePanel").addEventListener("click",clearSelection);
 
 /* Clicking anywhere that is not a person restores the tree to full strength.
