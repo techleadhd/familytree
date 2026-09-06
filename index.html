@@ -11,8 +11,10 @@
 :root{
   --paper:#EDEEE9; --card:#FBFBF9; --ink:#1F2421; --muted:#6B7268;
   --rule:#9AA096; --hair:#C8CCC4; --pine:#2E6B4F; --brick:#A6564A;
-  /* the selection reads against pine lineage, not with it */
-  --marine:#12557F;
+  /* the selection reads against pine lineage, not with it. Two weights of
+     the same idea: azure for the one box you clicked, marine for the quieter
+     mark on the far end of a comparison. */
+  --marine:#12557F; --azure:#1478D4;
   --band:#E6E8E1;
   --male:#DAE6F0; --female:#F2DEE5; --nosex:#F1F0EA;
   --male-ink:#274257; --female-ink:#5C2B3C;
@@ -84,10 +86,13 @@ main{flex:1; position:relative; overflow:hidden}
    heavy enough to read as a run up the chart, light enough that the selection
    still leads. */
 .kin .box{stroke:var(--pine); stroke-width:1.75}
-/* Marine, not pine: the person you clicked has to be findable inside the pine
+/* Azure, not pine: the person you clicked has to be findable inside the pine
    run of their own ancestry, which is otherwise the same colour at nearly the
-   same weight. */
-.sel .box{stroke:var(--marine); stroke-width:2.75}
+   same weight. Brighter and heavier than everything else on the chart on
+   purpose — at the zoom where a whole family fits on screen, a box is a
+   thumbnail and a 2.75px stroke a hairline, so the one mark that has to be
+   found at a glance gets 4px of a blue nothing else uses. */
+.sel .box{stroke:var(--azure); stroke-width:4}
 /* Both ends of a comparison are marked the same way — a second colour said
    nothing the panel's sentence doesn't already say. */
 .cmp .box{stroke:var(--marine); stroke-width:2.25}
@@ -506,6 +511,8 @@ function buildModel(rows){
       birth:r.birth_year||"", death:r.death_year||"",
       parentsRaw:r.parents, description:r.description||"",
       photo:(r.drive_photo||"").trim(),
+      row:P.size,                     /* where they sit in the sheet: the one
+                                         handle a family member has on layout */
       parentUnion:"", unions:[], gen:0
     });
   }
@@ -668,37 +675,203 @@ function layout(){
     const n=chains[ci].members.length;
     return n*BOX_W+(n-1)*PAIR_GAP;
   };
+  /* offset of a member's box inside its chain, from the chain's left edge */
+  const memberX=(ci,id)=>chains[ci].members.indexOf(id)*(BOX_W+PAIR_GAP);
+  /* and where a union's drop leaves that chain: halfway between the pair, or
+     the middle of a lone parent's box */
+  const dropOffset=(ci,u)=>{
+    const ms=chains[ci].members;
+    const ja=ms.indexOf(u.a), jb=ms.indexOf(u.b);
+    const j=(ja>=0&&jb>=0)?(ja+jb)/2:(ja>=0?ja:jb);
+    return j*(BOX_W+PAIR_GAP)+BOX_W/2;
+  };
+
+  /* Least-squares fit of group starts to where each group wants to be, in
+     order and GROUP_GAP apart — pool adjacent violators, exact in one pass.
+     Only ever a handful of groups: this is the several marriages of one
+     person, whose broods want overlapping space. */
+  function fitGroups(gs){
+    if(gs.length<2) return gs.map(g=>g.want);
+    const offs=[]; let acc=0;
+    for(let i=0;i<gs.length;i++){ if(i) acc+=gs[i-1].width+GROUP_GAP; offs.push(acc); }
+    const val=[], cnt=[];
+    for(let i=0;i<gs.length;i++){
+      let v=gs[i].want-offs[i], c=1;
+      while(val.length&&val[val.length-1]>v){
+        const pv=val.pop(), pc=cnt.pop();
+        v=(v*c+pv*pc)/(c+pc); c+=pc;
+      }
+      val.push(v); cnt.push(c);
+    }
+    const out=[];
+    for(let i=0;i<val.length;i++) for(let k=0;k<cnt[i];k++) out.push(val[i]);
+    return out.map((y,i)=>y+offs[i]);
+  }
+
+  /* Bottom-up. A node's subtree is measured as a width plus an `anchor` —
+     how far into that width the chain's own left edge sits — because a brood
+     centred on a drop near one end of a long chain hangs out past it, and a
+     plain bounding box from the chain's left edge cannot say so.
+
+     The important change from the version this replaces: each union is
+     centred on its *own* children, not the chain on *all* of them. Those are
+     the same thing only when a chain is one couple with one marriage. Give
+     someone a second marriage and there are two drops but still one chain
+     centre; give a chain three members and the drop sits between two of
+     them, nowhere near the middle. Both were drawn as one long sideways
+     reach from a drop to a brood that had been centred on something else. */
   function measure(n){
     n.own=chainW(n.ci);
-    let total=0;
+    const live=[];
     for(const g of n.groups){
-      let w=0;
-      for(const k of g.kids) w+=measure(k.node)+SIB_GAP;
-      g.width=Math.max(0,w-SIB_GAP);
-      if(g.width>0) total+=g.width+GROUP_GAP;
+      g.width=0;
+      if(!g.kids.length) continue;
+      let w=0, lo=Infinity, hi=-Infinity;
+      for(const k of g.kids){
+        measure(k.node);
+        /* where this child's own box lands, not their subtree's middle: the
+           bus meets the children, and a child who married drags a spouse
+           into the subtree that is no part of what the drop aims at */
+        const box=w+k.node.anchor+memberX(k.node.ci,k.anchor)+BOX_W/2;
+        lo=Math.min(lo,box); hi=Math.max(hi,box);
+        w+=k.node.width+SIB_GAP;
+      }
+      g.width=w-SIB_GAP;
+      g.ref=(lo+hi)/2;                                   /* the bus's midpoint */
+      g.drop=dropOffset(n.ci,U.get(g.uid));
+      g.want=g.drop-g.ref;                               /* so it meets the drop */
+      live.push(g);
     }
-    n.kidsW=Math.max(0,total-GROUP_GAP);
-    return n.width=Math.max(n.own,n.kidsW);
+    live.sort((a,b)=>a.drop-b.drop);
+    const starts=fitGroups(live);
+    live.forEach((g,i)=>g.start=starts[i]);
+
+    let lo=0, hi=n.own;
+    for(const g of live){ lo=Math.min(lo,g.start); hi=Math.max(hi,g.start+g.width); }
+    n.anchor=-lo;
+    return n.width=hi-lo;
   }
-  function place(n,x){
-    n.x=x;
-    let cx=x+(n.width-n.own)/2;
+
+  function place(n,X){
+    const chainX=X+n.anchor;
+    let cx=chainX;
     for(const m of chains[n.ci].members){
       const p=P.get(m);
       p.x=cx; p.y=(p.gen-1)*GEN_H+PAD;
       cx+=BOX_W+PAIR_GAP;
     }
-    let kx=x+(n.width-n.kidsW)/2;
     for(const g of n.groups){
       if(!g.width) continue;
-      let gx=kx;
+      let gx=chainX+g.start;
       for(const k of g.kids){ place(k.node,gx); gx+=k.node.width+SIB_GAP; }
-      kx+=g.width+GROUP_GAP;
     }
   }
+
+  /* Least-squares fit of a row of chains to where each wants to be, keeping
+     their order and their clearances — pool adjacent violators, exact, one
+     pass. Same machine as fitGroups, over a whole generation. */
+  function fitRow(list,want,weight){
+    if(list.length<2) return want.slice();
+    const offs=[]; let acc=0;
+    for(let i=0;i<list.length;i++){
+      /* `SIB_GAP` for every pair, not the wider GROUP_GAP a stranger would
+         get from `measure`. The visual separation between families is
+         already built into the tree pass's subtree widths; asking for it
+         again here only lets this pass shove apart a row it was supposed to
+         leave alone. Its one hard constraint is that boxes must not touch —
+         a connector crossing another is a hop. */
+      if(i) acc+=chainW(list[i-1])+SIB_GAP;
+      offs.push(acc);
+    }
+    const val=[], wt=[], run=[];
+    for(let i=0;i<list.length;i++){
+      let v=want[i]-offs[i], w=weight[i], n=1;
+      while(val.length&&val[val.length-1]>v){
+        const pv=val.pop(), pw=wt.pop(), pn=run.pop();
+        v=(v*w+pv*pw)/(w+pw); w+=pw; n+=pn;
+      }
+      val.push(v); wt.push(w); run.push(n);
+    }
+    const out=[];
+    for(let i=0;i<val.length;i++) for(let k=0;k<run[i];k++) out.push(val[i]);
+    return out.map((y,i)=>y+offs[i]);
+  }
+
+  /* One pass upward, once every box has an x.
+
+     `measure` and `place` build a tree, and a family tree is not one. A child
+     who marries into another family is placed once, in whichever branch
+     reached them first, so the other set of parents is left centred on
+     whichever children it happened to keep. Grace and Karl have three:
+     Nina and Owen married Whitfields and sit in the Whitfield block, so the
+     tree pass centred them over Sten alone, 1,286px from the middle of the
+     three.
+
+     So re-fit each generation to where its unions' children actually ended
+     up — all of them, wherever they were placed. Upward, because that makes
+     the row below already final: fitting a row never moves anything it was
+     measured against, so one pass is the whole of it. A chain moves as a
+     unit, so partners stay side by side; a chain with no children asks to
+     stay where it is. */
+  function settle(){
+    const byGen=new Map();
+    for(const c of chains){
+      const ms=c.members.map(m=>P.get(m)).filter(p=>p&&p.x!=null);
+      if(!ms.length) continue;
+      const g=Math.min(...ms.map(p=>p.gen));
+      if(!byGen.has(g)) byGen.set(g,[]);
+      byGen.get(g).push(c.i);
+    }
+    const leftOf=ci=>Math.min(...chains[ci].members
+      .map(m=>P.get(m)).filter(p=>p&&p.x!=null).map(p=>p.x));
+
+    for(const g of [...byGen.keys()].sort((a,b)=>b-a)){
+      const list=byGen.get(g);
+      list.sort((a,b)=>leftOf(a)-leftOf(b));
+      const want=[], weight=[];
+      for(const ci of list){
+        const aims=[];
+        for(const uid of chains[ci].unions){
+          const kids=(kidsOf.get(uid)||[]).map(k=>P.get(k)).filter(k=>k&&k.x!=null);
+          if(!kids.length) continue;
+          const cs=kids.map(k=>k.x+BOX_W/2);
+          aims.push((Math.min(...cs)+Math.max(...cs))/2-dropOffset(ci,U.get(uid)));
+        }
+        want.push(aims.length?aims.reduce((a,b)=>a+b,0)/aims.length:leftOf(ci));
+        /* One vote per brood, and almost none for a chain with no children.
+           A childless couple has no opinion about where it stands, but with
+           an equal vote it becomes an anchor: it asks to stay exactly where
+           the tree pass left it, and the fit dutifully splits the difference
+           between that and a neighbour who is trying to reach three children
+           of their own. In one test chart that cost a couple 1,530px of
+           centring to keep a childless in-law from being nudged. Let them be
+           carried along instead. */
+        weight.push(aims.length||0.02);
+      }
+      const fitted=fitRow(list,want,weight);
+      list.forEach((ci,i)=>{
+        let cx=fitted[i];
+        for(const m of chains[ci].members){
+          const p=P.get(m); if(p) p.x=cx;
+          cx+=BOX_W+PAIR_GAP;
+        }
+      });
+    }
+  }
+
   let cursor=GUTTER;
   for(const n of tree){ measure(n); place(n,cursor); cursor+=n.width+GROUP_GAP*1.5; }
-  return cursor+PAD;
+  settle();
+
+  let lo=Infinity, hi=-Infinity;
+  for(const p of P.values()){
+    if(p.x==null) continue;
+    lo=Math.min(lo,p.x); hi=Math.max(hi,p.x+BOX_W);
+  }
+  if(lo===Infinity) return cursor+PAD;
+  const shift=GUTTER-lo;
+  for(const p of P.values()) if(p.x!=null) p.x+=shift;
+  return hi-lo+GUTTER+PAD;
 }
 
 /* ---- kinship ----
